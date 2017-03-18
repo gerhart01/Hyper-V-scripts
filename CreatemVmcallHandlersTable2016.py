@@ -4,6 +4,8 @@ __version__ = "1.0.0"
 
 #Script parses and formats structure with hypercall hanlders in hvix64.exe 
 #Microsoft doesn't provide symbols #for hvix64.exe, therefore i called it VmcallHandlersTable
+#
+#Open hvix64.exe in IDA PRO and run script
 
 import idaapi
 
