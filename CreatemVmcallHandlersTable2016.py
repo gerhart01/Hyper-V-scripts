@@ -1,11 +1,28 @@
 __author__ = "Gerhart"
 __license__ = "GPL"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
-#Script parses and formats structure with hypercall hanlders in hvix64.exe 
+#Script parses and formats structure with hypercall hanlders in hvix64.exe\hvax64.exe 
 #Microsoft doesn't provide symbols #for hvix64.exe, therefore i called it VmcallHandlersTable
 #
-#Open hvix64.exe in IDA PRO and run script
+#Open hvix64.exe\hvax64.exe in IDA PRO and run script
+#
+#
+# One entry description
+#dq offset HvSwitchVirtualAddressSpace ; address of specific hypercall handler
+#CONST:FFFFF80006232020                 dw 1                    ; VMCALL ID
+#CONST:FFFFF80006232022                 dw 0                    ; REP CALL or not REP CALL
+#CONST:FFFFF80006232024                 dw 8                    ; size of hypercall input param (in bytes)  without rep prefix
+#CONST:FFFFF80006232026                 dw 0                    ; size of hypercall input param with rep prefix
+#CONST:FFFFF80006232028                 dw 0                    ; hypercall output 1 element param size without rep prefix
+#CONST:FFFFF8000623202A                 dw 0                    ; hypercall output 1 element param size with rep prefix
+#CONST:FFFFF8000623202C                 dd 43h                  ; group number of hypercall (f.e Virtual Interrupt Interfaces)
+#CONST:FFFFF8000623202C                                         ; used like index in table of statistics of hypercall using
+#
+#
+#
+#
+#
 
 import idaapi
 
