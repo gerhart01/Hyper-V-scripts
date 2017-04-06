@@ -1,5 +1,5 @@
 __author__ = "Gerhart"
-__license__ = "GPL"
+__license__ = "GPL3"
 __version__ = "1.0.1"
 
 #Script parses and formats structure with hypercall hanlders in hvix64.exe\hvax64.exe 
