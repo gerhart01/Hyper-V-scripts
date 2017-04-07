@@ -8,7 +8,7 @@ __version__ = "1.0.1"
 #Open hvix64.exe\hvax64.exe in IDA PRO and run script
 #
 #
-# Table element description (on HvSwitchVirtualAddressSpace hypercall)
+# Table element description (HvSwitchVirtualAddressSpace hypercall example)
 #dq offset HvSwitchVirtualAddressSpace ; address of specific hypercall handler
 #CONST:FFFFF80006232020                 dw 1                    ; VMCALL ID
 #CONST:FFFFF80006232022                 dw 0                    ; REP CALL or not REP CALL
