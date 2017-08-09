@@ -3,7 +3,7 @@ __license__ = "GPL3"
 __version__ = "0.0.1"
 
 #bases on http://www.codemachine.com/article_findafdendpoints.html
-#list afd endpoints with some additional info. Hyper-V sockets endpoints is included.
+#list afd endpoints with some additional info. Hyper-V sockets endpoints are included.
 
 from pykd import *
 import sys
