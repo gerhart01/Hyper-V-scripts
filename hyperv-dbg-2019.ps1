@@ -2,15 +2,17 @@
 # Argument initialization
 #
 
-# Script for configuring debugging Windows Server 2012 R2/ Windows 8.1 using kdvm.dll transport (was ported to virtualization\v2 WMI namespace)
+# Script for configuring debugging Windows Server 2012 R2/ Windows 8.1 using kdvm.dll transport 
+# (was ported to virtualization\v2 WMI namespace)
 # You need kdvm.dll from Windows Server 2012 R2 Preview build. Copy it to %Systemroot%\system32 dir
 # original script was published on osronline.com http://www.osronline.com/showthread.cfm?link=234398 by Jake Oshins
 #
 # Modified version can be used for 
-# Script for synthethic Windows 10/ Windows Server 2019 debugging was updated with information from 
+# Script for synthethic Windows 10/ Windows Server 2019 debugging was updated using information from 
 # https://withinrafael.com/2015/02/01/how-to-set-up-synthetic-kernel-debugging-for-hyper-v-virtual-machines/
 #
-# Script can config guest VM bcdedit settings using powershell direct, and make debug_guest_<VMName>.bat file with WinDBG launching parameters
+# Script can config guest VM bcdedit settings using powershell direct, and make debug_guest_<VMName>.bat 
+# file with WinDBG launching parameters (in current path)
 
 $nextarg = "none"
 $DebugPort = "unassigned" #port number (use in windbg connection string)
