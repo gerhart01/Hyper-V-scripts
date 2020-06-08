@@ -2,28 +2,26 @@
 # Argument initialization
 #
 
-# Script for configuring debugging Windows Server 2012 R2/ Windows 8.1 using kdvm.dll transport 
-# (was ported to virtualization\v2 WMI namespace)
+# Script for configuring debugging Windows Server 2012 R2/ Windows 8.1 using kdvm.dll transport (was ported to virtualization\v2 WMI namespace)
 # You need kdvm.dll from Windows Server 2012 R2 Preview build. Copy it to %Systemroot%\system32 dir
 # original script was published on osronline.com http://www.osronline.com/showthread.cfm?link=234398 by Jake Oshins
 #
 # Modified version can be used for 
-# Script for synthethic Windows 10/ Windows Server 2019 debugging was updated using information from 
+# Script for synthethic Windows 10/ Windows Server 2019 debugging was updated with information from 
 # https://withinrafael.com/2015/02/01/how-to-set-up-synthetic-kernel-debugging-for-hyper-v-virtual-machines/
 #
-# Script can config guest VM bcdedit settings using powershell direct, and make debug_guest_<VMName>.bat 
-# file with WinDBG launching parameters (in current path)
+# Script can config guest VM bcdedit settings using powershell direct, and make debug_guest_<VMName>.bat file with WinDBG launching parameters
 
 $nextarg = "none"
-$DebugPort = "unassigned" #port number (use in windbg connection string)
-$targetcomputer = $env:COMPUTERNAME #name of host OS
-$VMName = "" #virtual machine name
-$AutoAssign = "false"
-$DebugOff = "false"
-$ConfigVM = "true"
-$RebootVM = "false"
+$DebugPort = "unassigned"                 # port number (use in windbg connection string)
+$targetcomputer = $env:COMPUTERNAME       # Host OS name
+$VMName = ""                              # virtual machine name
+$AutoAssign = $false
+$DebugOff = $false
+$ConfigVM = $false
+$RebootVM = $false                        # reboot guest VM after configuring
 $VMGuid = ""
-$NotRewrite = $False # rewrite output file with windbg launching params
+$NotRewrite = $false                      # rewrite output file with windbg launching params
 
 function funHelp()
 {
@@ -45,9 +43,10 @@ PARAMETERS:
 
 SYNTAX:
 
-hyperv-dbg-2019.ps1 [-computerName targetcomputer] [-vmname NameOfVM] [-vmguid GuidOfVM] [-port PortNumber] [-ConfigVM $True|$False] [-RebootVM $True|$False]
+hyperv-dbg-2019.ps1 [-computerName targetcomputer] [-vmname NameOfVM] [-vmguid GuidOfVM] [-port PortNumber] [-ConfigVM] [-RebootVM] [-debugoff]
 
-.\hyperv-dbg-2019.ps1 -vmname Win10x64_Gen2 -port 50010 -ConfigVm $True -RebootVM $True
+.\hyperv-dbg-2019.ps1 -vmname Win10x6420H1-Gen2 -port 50010 -ConfigVm -RebootVM
+.\hyperv-dbg-2019.ps1 -vmname Win10x6420H1-Gen2 -debugoff
 
 "@
 $helpText
@@ -65,18 +64,18 @@ foreach ($argument in $args)
         "-help" {funHelp}
         "/?"    {funHelp}
         "-?"    {funHelp}
-        "autoassign"    {$AutoAssign = "true"}
-        "-autoassign"   {$AutoAssign = "true"}
-        "/autoassign"   {$AutoAssign = "true"}
-        "debugoff"        {$DebugOff = "true"}
-        "-debugoff"       {$DebugOff = "true"}
-        "/debugoff"       {$DebugOff = "true"}
-        "ConfigVM"        {$ConfigVM = "true"}
-        "-ConfigVM"       {$ConfigVM = "true"}
-        "/ConfigVM"       {$ConfigVM = "true"}
-        "RebootVM"        {$RebootVM = "true"}
-        "-RebootVM"       {$RebootVM = "true"}
-        "/RebootVM"       {$RebootVM = "true"}
+        "autoassign"    {$AutoAssign = $True}
+        "-autoassign"   {$AutoAssign = $True}
+        "/autoassign"   {$AutoAssign = $True}
+        "debugoff"        {$DebugOff = $True}
+        "-debugoff"       {$DebugOff = $True}
+        "/debugoff"       {$DebugOff = $True}
+        "ConfigVM"        {$ConfigVM = $True}
+        "-ConfigVM"       {$ConfigVM = $True}
+        "/ConfigVM"       {$ConfigVM = $True}
+        "RebootVM"        {$RebootVM = $True}
+        "-RebootVM"       {$RebootVM = $True}
+        "/RebootVM"       {$RebootVM = $True}
         default {}
     }
 
@@ -134,7 +133,7 @@ if ($VMGuid -ne "")
 $VMManagementService = gwmi -class "Msvm_VirtualSystemManagementService" -namespace "root\virtualization\v2" -computername $targetcomputer
 
 #Get the VM object that we want to modify
-$query = "SELECT * FROM Msvm_ComputerSystem WHERE ElementName='" + $VMName + "'"
+$query = "SELECT * FROM Msvm_ComputerSystem WHERE ElementName='" + $VM.Name + "'"
 $VM1 = gwmi -query $query -namespace "root\virtualization\v2" -computername $targetcomputer
 
 #Get the VirtualSystemGlobalSettingData of the VM we want to modify
@@ -170,6 +169,9 @@ if ($DebugOff -eq $True)
 
     #Update the VM with ModifyVirtualSystem
     $Result = $VMManagementService.ModifySystemSettings($VMSystemGlobalSettingData.GetText(1))
+
+    write-host "Debugging is disabled for" $VM.Name
+    exit
 }
 
 if ([string]::IsNullOrEmpty($VMName))
@@ -182,7 +184,7 @@ if ($ConfigVm -eq $True)
     
     if ($VM.Generation -eq 2)
     {
-        $FirmwareCfg = Get-VMFirmware Win10x64_Gen2
+        $FirmwareCfg = Get-VMFirmware $VM.Name
         if ($FirmwareCfg.SecureBoot -eq "On")
         {
             Write-Warning "You can't debug VM, until secureboot is enabled"
@@ -191,7 +193,7 @@ if ($ConfigVm -eq $True)
     }
 
 
-    $s = New-PSSession -VMName $VMName
+    $s = New-PSSession -VMName $VM.Name
 
     Invoke-Command -Session $s {bcdedit /debug yes}
 
@@ -203,18 +205,24 @@ if ($ConfigVm -eq $True)
     }
 }
 
+$VMName = $VM.Name
+
 $bat_file_name = "debug_guest_$VMName.bat"
 $bat_file_content = "windbg.exe -k net:target=$env:computername,port=$DebugPort,key=1.2.3.4"
+
+$header = "@echo off"
 
 if ($NotRewrite -eq $True)
 {
     if (-not (Test-Path $bat_file_name))
     {
+       $header | Out-File -FilePath $bat_file_name -Encoding ascii
        $bat_file_content | Out-File -FilePath $bat_file_name -Encoding ascii
     }
 } 
 else
 {
+    $header | Out-File -FilePath $bat_file_name -Encoding ascii
     $bat_file_content | Out-File -FilePath $bat_file_name -Encoding ascii
 }
 
