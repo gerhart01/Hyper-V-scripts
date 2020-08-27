@@ -7,9 +7,10 @@ __version__ = "1.2.0"
 # Hypercalls were taken from Hyper-V TLFS, winhvr.sys, winhv.sys, ntoskrnl.exe, securekernel.exe
 # Windows 10 and Windows Server 2019 have different hypercalls. There are not many, but don't forget about it.
 
-# 04-01-2020 Add hvix64 os detection by hypercalls count
-# 04-01-2020 Hypercall name updates from hvgdk.h (https://github.com/ionescu007/hdk/blob/master/hvgdk.h)
+# 04-01-2020 Add hvix64 OS detection by hypercalls count
+# 04-01-2020 Hypercall names updates from hvgdk.h (https://github.com/ionescu007/hdk/blob/master/hvgdk.h)
 # 04-01-2020 Add dynamically hypercall's count finding method
+# 27-08-2020 Some fixes of hypercall names from updated hvgdk.h (https://github.com/ionescu007/hdk/blob/master/hvgdk.h)
 
 import idaapi
 
@@ -20,11 +21,11 @@ hvcalls_dict = {
     0x0003: 'HvCallFlushVirtualAddressList',
     0x0004: 'HvCallGetLogicalProcessorRunTime',
     0x0005: 'HvCallUpdateHvProcessorFeatures',              #winhvr.sys (09.2019)
-    0x0006: 'HvSwitchAliasMap',
-    0x0007: 'HvUpdateMicrocodeDatabase',                    #ntoskrnl.exe, HvDynamicUpdateMicrocode has same microcode
+    0x0006: 'HvCallSwitchAliasMap',
+    0x0007: 'HvCallUpdateMicrocodeDatabase',                #ntoskrnl.exe, HvDynamicUpdateMicrocode has same microcode
     0x0008: 'HvCallNotifyLongSpinWait',
     0x0009: 'HvCallParkLogicalProcessors',
-    0x000a: 'HvDisableVpVtl',                               #winhvr.sys (09.2019)
+    0x000a: 'HvCallDisableVpVtl',                           #winhvr.sys (09.2019)
 	#2016
     0x000b: 'HvCallSendSyntheticClusterIpi',                #SkpgPatchGuardCallbackRoutine
     0x000c: 'HvCallModifyVtlProtectionMask',
@@ -204,7 +205,7 @@ hvcalls_dict = {
     0x00B7: 'HvCallGetCpuGroupProperty',                     #winhvr.sys
     0x00B8: 'HvCallSetCpuGroupProperty',                     #winhvr.sys
     0x00B9: 'HvCallGetCpuGroupAffinity',                     #winhvr.sys
-    0x00BA: 'HvCallGetNextCpuGroup',                       #winhvr.sys
+    0x00BA: 'HvCallGetNextCpuGroup',                         #winhvr.sys
     0x00BB: 'HvCallGetNextCpuGroupPartition',                #winhvr.sys
     0x00BC: 'HvCallAddPhysicalMemory',
     0x00BD: 'HvCallCompleteIntercept',                       #winhvr.sys
