@@ -10,7 +10,7 @@ __version__ = "1.2.0"
 # 04-01-2020 Add hvix64 OS detection by hypercalls count
 # 04-01-2020 Hypercall names updates from hvgdk.h (https://github.com/ionescu007/hdk/blob/master/hvgdk.h)
 # 04-01-2020 Add dynamically hypercall's count finding method
-# 27-08-2020 Some fixes of hypercall names from updated hvgdk.h (https://github.com/ionescu007/hdk/blob/master/hvgdk.h)
+# 27-08-2020 Hypercalls updates from new version of hvgdk.h (https://github.com/ionescu007/hdk/blob/master/hvgdk.h)
 
 import idaapi
 
@@ -24,8 +24,8 @@ hvcalls_dict = {
     0x0006: 'HvCallSwitchAliasMap',
     0x0007: 'HvCallUpdateMicrocodeDatabase',                #ntoskrnl.exe, HvDynamicUpdateMicrocode has same microcode
     0x0008: 'HvCallNotifyLongSpinWait',
-    0x0009: 'HvCallParkLogicalProcessors',
-    0x000a: 'HvCallDisableVpVtl',                           #winhvr.sys (09.2019)
+    0x0009: 'HvCallParkedLogicalProcessors',
+    0x000a: 'HvCallInvokeHypervisorDebugger',                  
 	#2016
     0x000b: 'HvCallSendSyntheticClusterIpi',                #SkpgPatchGuardCallbackRoutine
     0x000c: 'HvCallModifyVtlProtectionMask',
@@ -39,11 +39,11 @@ hvcalls_dict = {
     0x0014: 'HvCallFlushVirtualAddressListEx',
     0x0015: 'HvCallSendSyntheticClusterIpiEx',              #securekernel.exe, SkpgPatchGuardCallbackRoutine
 	#####
-    0x0016: 'HvCallGetImageInformation',
+    0x0016: 'HvCallQueryImageInfo',
     0x0017: 'HvCallMapPatchPages',                          #securekernel.exe, ShvlLoadHypervisorPatch
     0x0018: 'HvCallCommitPatch',                            #securekernel.exe, ShvlLoadHypervisorPatch
-    0x0019: 'HvCallReserved00',
-    0x001a: 'HvCallReserved00',
+    0x0019: 'HvCallSyncContext ',
+    0x001a: 'HvCallSyncContextEx',
     0x001b: 'HvCallReadPerfRegister',
     0x001c: 'HvCallWritePerfRegister',                      #ntoskrnl.exe, Fast hypercall
     0x001d: 'HvCallReserved00',
@@ -102,11 +102,11 @@ hvcalls_dict = {
     0x0052: 'HvCallTranslateVirtualAddress',                #used by securekernel.exe
     0x0053: 'HvCallReadGpa',
     0x0054: 'HvCallWriteGpa',
-    0x0055: 'HvCallDepricated',                             #depricated
+    0x0055: 'HvCallAssertVirtualInterruptDeprecated',                             #depricated
     0x0056: 'HvCallClearVirtualInterrupt',
-    0x0057: 'HvCallCreatePort',
+    0x0057: 'HvCallCreatePortDeprecated',
     0x0058: 'HvCallDeletePort',
-    0x0059: 'HvCallConnectPort',
+    0x0059: 'HvCallConnectPortDeprecated',
     0x005A: 'HvCallGetPortProperty',
     0x005B: 'HvCallDisconnectPort',
     0x005C: 'HvCallPostMessage',
@@ -150,7 +150,7 @@ hvcalls_dict = {
     0x0082: 'HvCallAttachDevice',
     0x0083: 'HvCallDetachDevice',
     0x0084: 'HvCallEnterSleepState',
-    0x0085: 'HvCallPrepareForSleep',                        #HvNotifyStandbyTransition in winhvr.sys (09.2019)
+    0x0085: 'HvCallNotifyStandbyTransition',                        #HvNotifyStandbyTransition in winhvr.sys (09.2019)
     0x0086: 'HvCallPrepareForHibernate',
     0x0087: 'HvCallNotifyPartitionEvent',
     0x0088: 'HvCallGetLogicalProcessorRegisters',
@@ -185,11 +185,11 @@ hvcalls_dict = {
     0x00A4: 'HvCallEnablePasid',
     0x00A5: 'HvCallDisablePasid',
     0x00A6: 'HvCallAcknowledgePageRequest',
-    0x00A7: 'HvCallCreatePrQueue',
-    0x00A8: 'HvCallDeletePrQueue',
-    0x00A9: 'HvCallClearPrqStalled',
-    0x00AA: 'HvCallGetDeviceEnabled',
-    0x00AB: 'HvCallSetDeviceEnabled',
+    0x00A7: 'HvCallCreateDevicePrQueue',
+    0x00A8: 'HvCallDeleteDevicePrQueue',
+    0x00A9: 'HvCallSetDevicePrqProperty',
+    0x00AA: 'HvCallGetPhysicalDeviceProperty',
+    0x00AB: 'HvCallSetPhysicalDeviceProperty',
     0x00AC: 'HvCallTranslateVirtualAddressEx',               #winhvr.sys. Early it has hypercall id 0x52
     0x00AD: 'HvCallCheckForIoIntercept',	                 #winhvr.sys
     0x00AE: 'HvCallSetGpaPageAttributes',                    #securekernel.exe
@@ -217,33 +217,34 @@ hvcalls_dict = {
     0x00C3: 'HvCallProcessIommuPrq',
     0x00C4: 'HvCallDetachDeviceDomain',
     0x00C5: 'HvCallDeleteDeviceDomain',
-    0x00C6: 'HvCallReserved00',
+    0x00C6: 'HvCallQueryDeviceDomain',
     0x00C7: 'HvCallMapSparseDeviceGpaPages',
     0x00C8: 'HvCallUnmapSparseDeviceGpaPages',
     0x00C9: 'HvCallGetGpaPagesAccessState',                  #winhvr.sys
     0x00CA: 'HvCallGetSparseGpaPagesAccessState',
-    0x00CB: 'HvCallReserved00', 
+    0x00CB: 'HvCallInvokeTestFramework', 
     0x00CC: 'HvCallQueryVtlProtectionMaskRange',             #winhvr.sys
     0x00CD: 'HvCallModifyVtlProtectionMaskRange',            #winhvr.sys
-    0x00CE: 'HvCallReserved00',
-    0x00CF: 'HvCallReserved00',
-    0x00D1: 'HvCallReserved00', 
+    0x00CE: 'HvCallConfigureDeviceDomain',
+    0x00CF: 'HvCallQueryDeviceDomainProperties',
+    0x00D0: 'HvCallFlushDeviceDomain',
+    0x00D1: 'HvCallFlushDeviceDomainList', 
     0x00D2: 'HvCallAcquireSparseGpaPageHostAccess',          #winhvr.sys
     0x00D3: 'HvCallReleaseSparseGpaPageHostAccess',          #winhvr.sys
     0x00D4: 'HvCallCheckSparseGpaPageVtlAccess',             #winhvr.sys
-    0x00D5: 'HvCallReserved00',
-    0x00D6: 'HvCallReserved00',
+    0x00D5: 'HvCallEnableDeviceInterrupt',
+    0x00D6: 'HvCallFlushTlb',
     0x00D7: 'HvCallAcquireSparseSpaPageHostAccess',          #winhvr.sys
-    0x00D8: 'HvCallReleaseSparseSpaPageHostAccess',          #winhvr.sys
-    0x00D9: 'HvCallModifySparseGpaPageHostVisibility',       #winhv.sys
+    0x00D8: 'HvCallUnacquireSparseSpaPageHostAccess',          #winhvr.sys
+    0x00D9: 'HvCallAcceptGpaPages',                          #winhv.sys
     0x00DA: 'HvCallUnacceptGpaPages',
-    0x00DB: 'HvCallAcceptGpaPages',                          #winhvr.sys
+    0x00DB: 'HvCallModifySparseGpaPageHostVisibility',                          #winhvr.sys
     0x00DC: 'HvCallLockSparseGpaPageMapping',
     0x00DD: 'HvCallUnlockSparseGpaPageMapping',
-    0x00DE: 'HvUnknown01',
+    0x00DE: 'HvCallRequestProcessorHalt',
     0x00DF: 'HvCallGetInterceptData',
     0x00E0: 'HvCallQueryDeviceInterruptTarget',              #winhvr.sys
-    0x00E1: 'HvCallMapVpRegisterPage',                       #winhvr.sys (HvMapVpStatePage in Windows 10)
+    0x00E1: 'HvCallMapVpStatePage',                          #winhvr.sys (HvMapVpStatePage in Windows 10)
     0x00E2: 'HvCallUnmapVpStatePage',
     0x00E3: 'HvCallGetXsaveData',                            #winhvr.sys
     0x00E4: 'HvCallSetXsaveData',                            #winhvr.sys
