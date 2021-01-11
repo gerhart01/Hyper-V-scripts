@@ -1,6 +1,6 @@
 import idaapi
 
-idtr_str = Eval('SendDbgCommand("r idtr")')
+idtr_str = Eval('send_dbg_command("r idtr")')
 idtr = long(idtr_str[5:-1],16)
 print "idtr = 0x%x" % idtr
 i = 256
@@ -19,7 +19,7 @@ for i in range(0,256):
     #    isr = isr+(ord(buf[j]) << (8*(j-4)))
     #for j in range(0,2):
     #    isr = isr+(ord(buf[j]) << (8*(j)))
-    print "isr %x address = 0x" % i,hex(isr)
-    idc.MakeCode(isr)
-    idc.MakeFunction(isr)
-    MakeNameEx(isr,str('mISR_') + hex(i).upper(), SN_NOWARN)
+    print "isr %x address = " % i,hex(isr)
+    idc.create_insn(isr)
+    idc.add_func(isr)
+    set_name(isr,str('mISR_') + hex(i).upper(), SN_NOWARN)

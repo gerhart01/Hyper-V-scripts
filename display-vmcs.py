@@ -160,13 +160,14 @@ def get_vmcs_table():
     #patch_address = LocByName('mHandle_VMCALL')+0xF #mHandle_VMCALL - vmcall handling function #for
     #bp_chunk = patch_address+0x577F5                                                           #checked
     #vmcs_show = bp_chunk+0x100                                                                 #build 6.2.9200.16384
-    vmcs_show = LocByName('mISR_FF')                                                            #for release build
+    vmcs_show = LocByName('mISR_0XFF')                                                            #for release build
     vmcs_show = FindFuncEnd(vmcs_show)+1
     tmp = vmcs_show
     for code_byte in vmcs_show_opcode:
 		PatchByte(tmp, code_byte)
 		tmp = tmp + 1
-    efl_str = Eval('SendDbgCommand("r efl")')
+    #efl_str = Eval('SendDbgCommand("r efl")')
+    efl_str = Eval('send_dbg_command("r efl")')
     EflBackup = long(efl_str[5:-1],16)
     RipBackup = GetRegValue('rip')
     RaxBackup = GetRegValue('rax')
