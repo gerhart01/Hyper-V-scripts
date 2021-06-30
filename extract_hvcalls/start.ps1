@@ -17,8 +17,8 @@
 #
 
 
-$dir_with_hvcalls_bin = "F:\ida_files\10x6421H1\4hypercalls\test"
-$path_to_ida = "F:\Tools\IDA7.5SP3\ida64.exe"
+$dir_with_hvcalls_bin = "F:\bin"
+$path_to_ida = "F:\IDA\ida64.exe"
 $path_to_script = (Get-Location).Path + "\extract_hvcalls.py"
 
 
