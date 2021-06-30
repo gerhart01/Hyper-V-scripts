@@ -1,3 +1,7 @@
+__author__ = "Gerhart"
+__license__ = "GPL"
+__version__ = "1.0.0"
+
 import os
 import sys
 import json
