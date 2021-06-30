@@ -18,4 +18,6 @@ additionally can be added
 	hvcalls_results.json - list of Hyper-V hypercalls
 	hvcalls_unknown.json - list of hypercalls name with unknown Hypercall code (you need do manual analysis for it)
 	
+I recommend extract hypercalls from winhvr.sys and winhv.sys first, then from other files.
+	
 ![](./image01.png)
