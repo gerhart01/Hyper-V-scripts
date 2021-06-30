@@ -56,7 +56,7 @@ function GetHvcallBinaries()
 }
 
 # Uncomment if you working with current Windows distr
-GetHvcallBinaries
+# GetHvcallBinaries
 
 Get-ChildItem $dir_with_hvcalls_bin  | where {$_.extension -in ".sys",".exe"} | ForEach-Object {
     $fn = $_.FullName
