@@ -8,10 +8,6 @@ import sys
 import json
 import pathlib
 
-hard_hvcalls = {
-
-}
-
 script_args = len(idc.ARGV)
 print("script_args", script_args)
 
@@ -22,6 +18,7 @@ current_dir = str(pathlib.Path(__file__).parent.resolve())
 
 sys.path.append(current_dir + "\\idahunt\\")
 import ida_helper
+idb_name = ida_helper.get_idb_name()
 
 hvcall_dict = {}
 hvcall_dict_unknown = {}
@@ -303,23 +300,26 @@ def int_key_to_hex(dictionary):
 # winhvr.sys, winhv.sys
 #
 
-find_hvcall_by_aux_function_name('WinHvpSimplePoolHypercall_CallViaMacro', 1, "decompile")
-find_hvcall_by_aux_function_name('WinHvpRangeRepHypercall', 0, "decompile")
-find_hvcall_by_aux_function_name('WinHvpSpecialListRepHypercall', 0, "decompile")
+if (idb_name == "winhvr.sys") or (idb_name == "winhv.sys"):
+    find_hvcall_by_aux_function_name('WinHvpSimplePoolHypercall_CallViaMacro', 1, "decompile")
+    find_hvcall_by_aux_function_name('WinHvpRangeRepHypercall', 0, "decompile")
+    find_hvcall_by_aux_function_name('WinHvpSpecialListRepHypercall', 0, "decompile")
 
 #
-# securekernel.exe
+# securekernel.exe, securekernella57.exe
 #
 
-find_hvcall_by_aux_function_name('ShvlpInitiateFastHypercall', 0, "decompile")
-find_hvcall_by_aux_function_name('ShvlpInitiateRepListHypercall', 0, "decompile")
+if (idb_name == "securekernel.exe") or (idb_name == "securekernella57.exe"):
+    find_hvcall_by_aux_function_name('ShvlpInitiateFastHypercall', 0, "decompile")
+    find_hvcall_by_aux_function_name('ShvlpInitiateRepListHypercall', 0, "decompile")
 
 #
 # ntoskrnl.exe
 #
 
-find_hvcall_by_aux_function_name('HvcallFastExtended', 0, "decompile")
-find_hvcall_by_aux_function_name('HvcallInitiateHypercall', 0, "decompile")
+if (idb_name == "ntoskrnl.exe") or (idb_name == "ntkrla57.exe"):
+    find_hvcall_by_aux_function_name('HvcallFastExtended', 0, "decompile")
+    find_hvcall_by_aux_function_name('HvcallInitiateHypercall', 0, "decompile")
 
 print_hvcall(hvcall_dict, False)
 
@@ -338,7 +338,7 @@ if len(hvcall_dict_unknown) > 0:
 print("hvcall_dict lenght:", len(hvcall_dict))
 print("hvcall_dict_unknown lenght:", len(hvcall_dict_unknown))
 print("db file:", ida_nalt.get_input_file_path())
-print("idb", ida_helper.get_idb_name())
+print("idb", idb_name)
 
 if script_args > 0:
     idc.qexit(0)

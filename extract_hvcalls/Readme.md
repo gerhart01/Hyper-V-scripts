@@ -18,6 +18,10 @@ additionally can be added
 	hvcalls_results.json - list of Hyper-V hypercalls
 	hvcalls_unknown.json - list of hypercalls name with unknown Hypercall code (you need do manual analysis for it)
 	
+You can use extract_hvcalls.py in non batch mode. Simply open idb database and run script (ALT+F7) in IDA PRO gui.
+	
 I recommend extract hypercalls from winhvr.sys and winhv.sys first, then from other files.
+
+Script start.ps1 can open existing .i64 files, if they are presented in $dir_with_hvcalls_bin directory.
 	
 ![](./image01.png)
