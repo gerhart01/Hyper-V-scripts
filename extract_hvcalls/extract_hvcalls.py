@@ -2,10 +2,15 @@ __author__ = "Gerhart"
 __license__ = "GPL3"
 __version__ = "1.0.0"
 
+
 import os
 import sys
 import json
 import pathlib
+
+hard_hvcalls = {
+
+}
 
 script_args = len(idc.ARGV)
 print("script_args", script_args)
@@ -19,18 +24,18 @@ sys.path.append(current_dir + "\\idahunt\\")
 import ida_helper
 
 hvcall_dict = {}
-hvcall_dict_uknown = {}
+hvcall_dict_unknown = {}
 
-hvcall_file_path = current_dir + "\\hvcalls_dict.json"
+# hvcall_file_path = current_dir + "\\hvcalls_dict.json"
 
 hvcall_dir_saving = current_dir + "\\hvcalls_json_files\\"
-hvcall_uknown_dir_saving = hvcall_dir_saving + "\\uknown\\"
+hvcall_unknown_dir_saving = hvcall_dir_saving + "\\unknown\\"
 
 if not os.path.exists(hvcall_dir_saving):
     os.makedirs(hvcall_dir_saving)
 
-if not os.path.exists(hvcall_uknown_dir_saving):
-    os.makedirs(hvcall_uknown_dir_saving)
+if not os.path.exists(hvcall_unknown_dir_saving):
+    os.makedirs(hvcall_unknown_dir_saving)
 
 
 def find_duplicates(dict1, dict2):
@@ -41,9 +46,9 @@ def find_duplicates(dict1, dict2):
     print("Intersects:", intersect)
 
 
-def save_dict_to_file(hvcall_file_path, t_dict):
-    file = open(hvcall_file_path, "w")
-    print("Saving file to ", hvcall_file_path)
+def save_dict_to_file(file_path, t_dict):
+    file = open(file_path, "w")
+    print("Saving file to ", file_path)
     json.dump(t_dict, file, indent=4)  # sort_keys=True
     file.close()
 
@@ -144,8 +149,8 @@ def extract_hvcall_id_from_param(number_str, hvcall_name):
         else:
             hvcall_id = int(hvcall_id)
     except:
-        hvcall_dict_uknown[hvcall_id] = hvcall_name.replace("WinHv", "HvCall")
-        hvcall_id = "id_uknown"
+        hvcall_dict_unknown[hvcall_id] = hvcall_name.replace("WinHv", "HvCall")
+        hvcall_id = "id_unknown"
 
     if hvcall_id == 0:
         print("hvcall_id in str format", number_str)
@@ -241,7 +246,7 @@ def find_hvcall_by_aux_function_name(fn_name, arg_number, method):
 
             hvcall_id = get_hvcall_from_decompiler_result(fn_name, xref.frm, arg_number, hvcall_name)
 
-            if (hvcall_id != 0) and (hvcall_id != "id_uknown"):
+            if (hvcall_id != 0) and (hvcall_id != "id_unknown"):
                 hvcall_dict[hvcall_id] = hvcall_name.replace("WinHv", "HvCall")
                 count += 1
 
@@ -324,14 +329,14 @@ filename = hvcall_dir_saving + ida_helper.get_idb_name() + ".json"
 hvcall_dict = str_key_to_int_with_sorting(hvcall_dict)
 save_dict_to_file(filename, hvcall_dict)
 
-if len(hvcall_dict_uknown) > 0:
-    bad_filename = hvcall_uknown_dir_saving + "uknown_" + ida_helper.get_idb_name() + ".json"
-    save_dict_to_file(bad_filename, hvcall_dict_uknown)
-    print("hvcalls with uknown result of analysis  - need manual analysis")
-    print_hvcall(hvcall_dict_uknown, True)
+if len(hvcall_dict_unknown) > 0:
+    unknown_filename = hvcall_unknown_dir_saving + "unknown_" + ida_helper.get_idb_name() + ".json"
+    save_dict_to_file(unknown_filename, hvcall_dict_unknown)
+    print("hvcalls with unknown result of analysis  - need manual analysis")
+    print_hvcall(hvcall_dict_unknown, True)
 
 print("hvcall_dict lenght:", len(hvcall_dict))
-print("hvcall_dict_uknown lenght:", len(hvcall_dict_uknown))
+print("hvcall_dict_unknown lenght:", len(hvcall_dict_unknown))
 print("db file:", ida_nalt.get_input_file_path())
 print("idb", ida_helper.get_idb_name())
 
