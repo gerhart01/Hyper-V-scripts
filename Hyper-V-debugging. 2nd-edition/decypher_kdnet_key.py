@@ -1,3 +1,7 @@
+__author__ = "Gerhart"
+__license__ = "GPL3"
+__version__ = "1.0.0"
+
 from pykd import *
 
 ## https://stackoverflow.com/questions/1181919/python-base-36-encoding
