@@ -1,0 +1,5 @@
+idahunt - https://github.com/nccgroup/idahunt
+
+pip install:
+ sark
+ pefile
