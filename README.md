@@ -9,3 +9,9 @@ Different scripts for Microsoft Hyper-V internals researches. Folder ida75 conta
 
 For latest Windows versions (Windows Server 2022 and Windows 11) and older Windows version with fresh patches, i recomment to use extract_hvcalls or extract_hvcalls_gui scripts, which are dynamically extract new hypercalls.
 Extract_hvcalls_gui video demonstration: https://www.youtube.com/watch?v=ohO4Hs4y59M 
+
+- ParseAfdEndpointListHead.py - script for parsing afd!AfdEndpointListHead structure (WinDBG + pykd)
+![](./images/image001.png)
+
+- ParseAfdTlTransportListHead.py - script for parsing afd!AfdTlTransportListHead (WinDBG + pykd)
+![](./images/image002.png)
