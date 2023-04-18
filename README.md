@@ -11,7 +11,7 @@ For latest Windows versions (Windows Server 2022 and Windows 11) and older Windo
 Extract hvcalls gui video demonstration: https://www.youtube.com/watch?v=ohO4Hs4y59M 
 
 Some of scripts are using pykd: https://githomelab.ru/pykd/pykd/-/wikis/home.
-If server is unavailable, you can use next instruction for pykd launching
+If server is unavailable, you can use next instructions for pykd launching:
 
 1. Install python 3.9
 2. Install pykd module from pip
@@ -23,7 +23,7 @@ If server is unavailable, you can use next instruction for pykd launching
 
     ```
     .load "path_to_py_kd_dll"
-    !py _path_to_script
+    !py path_to_script
     ```
 
 ParseAfdEndpointListHead.py - script for parsing afd!AfdEndpointListHead structure (WinDBG + pykd)
