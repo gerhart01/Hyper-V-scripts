@@ -1,3 +1,7 @@
+__author__ = "Gerhart"
+__license__ = "GPL3"
+__version__ = "1.3.0"
+
 import idaapi
 
 idtr_str = Eval('send_dbg_command("r idtr")')

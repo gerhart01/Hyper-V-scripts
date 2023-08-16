@@ -1,3 +1,7 @@
+__author__ = "Gerhart"
+__license__ = "GPL"
+__version__ = "1.3.0"
+
 #
 # developed by @gerhart_x
 # GPL3 licence

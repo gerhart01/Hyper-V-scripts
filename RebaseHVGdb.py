@@ -1,3 +1,7 @@
+__author__ = "Gerhart"
+__license__ = "GPL3"
+__version__ = "1.0.0"
+
 #based on https://github.com/Cr4sh/IDA-VMware-GDB
 Ptr = Qword
 

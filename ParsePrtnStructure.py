@@ -1,70 +1,120 @@
 __author__ = "Gerhart"
 __license__ = "GPL"
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 # python 3.x version
 
 from pykd import *
 import sys
 
 WINDOWS_SERVER_2016 = 0
-WINDOWS_SERVER_2019 = 1
+WINDOWS_SERVER_2019 = 0
+WINDOWS_SERVER_2022 = 1
+WINDOWS_11 = 0
+WINDOWS_11_PREVIEW = 0
 
-GPAR_ARRAY_OFFSET = 0x8
+if WINDOWS_SERVER_2022 == 1:
+    PARTITION_NAME_OFFSET = 0x88
+    MBLOCKS_ARRAY_PRTN_OFFSET = 0x2ac0
 
-MBLOCK_ARRAY_START_POSITION_OFFSET = 8
-MBLOCK_ARRAY_ELEMENT_COUNT_OFFSET = 0
-
-if WINDOWS_SERVER_2019 == 1:
-    PARTITION_NAME_OFFSET = 0x78
-    PARTITION_ID_OFFSET = PARTITION_NAME_OFFSET + 0x200
-    MBLOCKS_ARRAY_OFFSET = 0x1218
-
-    GPAR_BLOCK_HANDLE_OFFSET = 0x1520
+    GPAR_BLOCK_HANDLE_OFFSET = 0x2e50
     GPAR_ELEMENT_COUNT_OFFSET = 0x14
 
     # GPAR element offsets
 
-    GPAR_ELEMENT_SIGNATURE = 0  # ANSI string
-    GPAR_ELEMENT_GPA_INDEX_START = 0x100
-    GPAR_ELEMENT_GPA_INDEX_END = 0x108
-    GPAR_ELEMENT_UM_FLAGS = 0x120  # dword
     GPAR_ELEMENT_MBLOCK_ELEMENT = 0x170
     GPAR_ELEMENT_SOME_GPA_OFFSET = 0x178
     GPAR_ELEMENT_VMMEM_GPA_OFFSET = 0x180
 
     # MBLOCK element offsets
 
-    MBLOCK_ELEMENT_SIGNATURE = 0
     MBLOCK_ELEMENT_MBHANDLE = 0x18
-    MBLOCK_ELEMENT_BITMAP_SIZE_01 = 0x38
-    MBLOCK_ELEMENT_BITMAP_SIZE_02 = 0x40
+    MBLOCK_ELEMENT_GUEST_ADDRESS_ARRAY = 0xF0
+
+if WINDOWS_SERVER_2019 == 1:
+    PARTITION_NAME_OFFSET = 0x78
+    MBLOCKS_ARRAY_PRTN_OFFSET = 0x1218
+
+    GPAR_BLOCK_HANDLE_OFFSET = 0x1520
+    GPAR_ELEMENT_COUNT_OFFSET = 0x14
+
+    # GPAR element offsets
+
+    GPAR_ELEMENT_MBLOCK_ELEMENT = 0x170
+    GPAR_ELEMENT_SOME_GPA_OFFSET = 0x178
+    GPAR_ELEMENT_VMMEM_GPA_OFFSET = 0x180
+
+    # MBLOCK element offsets
+
+    MBLOCK_ELEMENT_MBHANDLE = 0x18
     MBLOCK_ELEMENT_GUEST_ADDRESS_ARRAY = 0xF0
 
 if WINDOWS_SERVER_2016 == 1:
     PARTITION_NAME_OFFSET = 0x70
-    PARTITION_ID_OFFSET = PARTITION_NAME_OFFSET + 0x200
-    MBLOCKS_ARRAY_OFFSET = 0x1240
+    MBLOCKS_ARRAY_PRTN_OFFSET = 0x1240
 
     GPAR_BLOCK_HANDLE_OFFSET = 0x13A0
     GPAR_ELEMENT_COUNT_OFFSET = 0x18
 
     # GPAR element offsets
 
-    GPAR_ELEMENT_SIGNATURE = 0  # ANSI string
-    GPAR_ELEMENT_GPA_INDEX_START = 0x100
-    GPAR_ELEMENT_GPA_INDEX_END = 0x108
-    GPAR_ELEMENT_UM_FLAGS = 0x120  # dword
     GPAR_ELEMENT_MBLOCK_ELEMENT = 0x128
     GPAR_ELEMENT_SOME_GPA_OFFSET = 0x178
     GPAR_ELEMENT_VMMEM_GPA_OFFSET = 0x180
 
     # MBLOCK element offsets
 
-    MBLOCK_ELEMENT_SIGNATURE = 0
     MBLOCK_ELEMENT_MBHANDLE = 0x18
-    MBLOCK_ELEMENT_BITMAP_SIZE_01 = 0x38
-    MBLOCK_ELEMENT_BITMAP_SIZE_02 = 0x40
     MBLOCK_ELEMENT_GUEST_ADDRESS_ARRAY = 0xE0
+
+
+if WINDOWS_11 == 1:
+    PARTITION_NAME_OFFSET = 0x70
+    MBLOCKS_ARRAY_PRTN_OFFSET = 0x1240
+
+    GPAR_BLOCK_HANDLE_OFFSET = 0x13A0
+    GPAR_ELEMENT_COUNT_OFFSET = 0x18
+
+    # GPAR element offsets
+
+    GPAR_ELEMENT_MBLOCK_ELEMENT = 0x128
+    GPAR_ELEMENT_SOME_GPA_OFFSET = 0x178
+    GPAR_ELEMENT_VMMEM_GPA_OFFSET = 0x180
+
+    # MBLOCK element offsets
+
+    MBLOCK_ELEMENT_MBHANDLE = 0x18
+    MBLOCK_ELEMENT_GUEST_ADDRESS_ARRAY = 0xE0
+
+
+if WINDOWS_11_PREVIEW == 1:
+    PARTITION_NAME_OFFSET = 0x88
+    MBLOCKS_ARRAY_PRTN_OFFSET = 0xac8
+    GPAR_BLOCK_HANDLE_OFFSET = 0xea0
+    GPAR_ELEMENT_COUNT_OFFSET = 0x14
+
+    # GPAR element offsets
+
+    GPAR_ELEMENT_MBLOCK_ELEMENT = 0x180
+    GPAR_ELEMENT_SOME_GPA_OFFSET = 0x178
+    GPAR_ELEMENT_VMMEM_GPA_OFFSET = 0x190
+
+    # MBLOCK element offsets
+
+    MBLOCK_ELEMENT_MBHANDLE = 0x20
+    MBLOCK_ELEMENT_GUEST_ADDRESS_ARRAY = 0xE0
+
+
+PARTITION_ID_OFFSET = PARTITION_NAME_OFFSET + 0x200
+MBLOCK_ELEMENT_BITMAP_SIZE_01 = 0x38
+MBLOCK_ELEMENT_BITMAP_SIZE_02 = 0x40
+GPAR_ELEMENT_SIGNATURE = 0  # ANSI string
+GPAR_ELEMENT_GPA_INDEX_START = 0x100
+GPAR_ELEMENT_GPA_INDEX_END = 0x108
+MBLOCK_ELEMENT_SIGNATURE = 0
+GPAR_ELEMENT_UM_FLAGS = 0x120  # dword
+GPAR_ARRAY_OFFSET = 0x8
+MBLOCK_ARRAY_START_POSITION_OFFSET = 8
+MBLOCK_ARRAY_ELEMENT_COUNT_OFFSET = 0
 
 
 def get_pykd_version():
@@ -181,12 +231,14 @@ def PrintPartitionHandleInfo(hPartitionHandle):
 
     # MBLOCK information
 
-    pMBlockTable = pykd.ptrQWord(hPartitionHandle + MBLOCKS_ARRAY_OFFSET)
+    pMBlockTable = pykd.ptrQWord(hPartitionHandle + MBLOCKS_ARRAY_PRTN_OFFSET)
+    print("pMBlockTable: ", hex(pMBlockTable))
     qwMBlocksCount = pykd.ptrQWord(pMBlockTable + MBLOCK_ARRAY_ELEMENT_COUNT_OFFSET) - 1
 
     # GPAR blocks information
 
     pGparBlockHandle = pykd.ptrQWord(hPartitionHandle + GPAR_BLOCK_HANDLE_OFFSET)
+    print("pGparBlockHandle: ", hex(pGparBlockHandle))
     dwGparElementCounts = pykd.ptrDWord(pGparBlockHandle + GPAR_ELEMENT_COUNT_OFFSET)
     pGparArray = pykd.ptrQWord(pGparBlockHandle + GPAR_ARRAY_OFFSET)
 
@@ -204,16 +256,20 @@ def PrintPartitionHandleInfo(hPartitionHandle):
     PrintGparArray(pGparArray, dwGparElementCounts)
     PrintMBlockArray(pMBlockTable, qwMBlocksCount)
 
-
+#
 # General winhvr.sys info
+#
 
 if not get_pykd_version:
     exit()
 
+print("Script for show memory blocks inside Hyper-V partition")
+pykd.dbgCommand(".reload")
+
 winhvr = pykd.module("winhvr")
 WinHvpPartitionArray = winhvr.WinHvpPartitionArray
 ptrInternalPartitions = pykd.ptrQWord(WinHvpPartitionArray)
-PartitionsCount = pykd.ptrQWord(ptrInternalPartitions)
+PartitionsCount = pykd.ptrDWord(ptrInternalPartitions)
 
 print("Count of Hyper-V partitions: ", PartitionsCount)
 
