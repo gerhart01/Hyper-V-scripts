@@ -1,55 +1,72 @@
 __author__ = "Gerhart"
 __license__ = "GPL3"
-__version__ = "1.0.0"
+__version__ = "1.0.3"
+
+#
+#  Script is used for modules 
+#       winhvr.sys
+#       winhv.sys
+#       securekernel.exe
+#       securekernel57.exe
+#       ntoskrnl.exe 
+#       ntoskrnl57.exe
+#  many functions inside export of winhvr.sys doesn't use hypercalls
+#
 
 import os
 import sys
 import json
 import pathlib
+import idc
+import idautils
+import ida_xref
 
+#
 # ntoskrnl, build 10.0.20298.1
+#
+
 g_hardcoded_hvcalls_10_0_20298_1 = {
-    0x2: "HvlpSlowFlushListTb",  # v9 = 2i64; #  LODWORD(v19) = 3;
-    0x3: "HvlpSlowFlushListTb",  # v9 = 2i64; #  LODWORD(v19) = 3;
-    0x13: "HvlpSlowFlushAddressSpaceTbEx",  # HvcallInitiateHypercall(((v10 + 7) << 14) & 0x3FE0000 | 0x13u
-    # difference in parameters HvlpFastFlushAddressSpaceTbEx (v4 + 7) << 14) & 0x3FE0000 | 0x10013u
-    0x14: "HvlpSlowFlushListTbEx",  # LODWORD(v20) = ((v11 + 7) << 14) & 0x3FE0000 | 0x14;
-    0x15: "HvlpSlowSendSyntheticClusterIpiEx",  # v8 = HvcallInitiateHypercall(((v5 + 7) << 14) & 0x3FE0000 | 0x15i64,
-    0x48: "HvlMapGpaPages",  # LODWORD(a6) = 75;
-    # HvlpDepositPages - different name for same hypercall
+    0x2:  "HvlpSlowFlushListTb",                                            # v9 = 2i64; #  LODWORD(v19) = 3;
+    0x3:  "HvlpSlowFlushListTb",                                            # v9 = 2i64;  #  LODWORD(v19) = 3;
+    0x13: "HvlpSlowFlushAddressSpaceTbEx",                                  # HvcallInitiateHypercall(((v10 + 7) << 14) & 0x3FE0000 | 0x13u
+    0x14: "HvlpSlowFlushListTbEx",                                          # LODWORD(v20) = ((v11 + 7) << 14) & 0x3FE0000 | 0x14;
+    0x15: "HvlpSlowSendSyntheticClusterIpiEx",                              # v8 = HvcallInitiateHypercall(((v5 + 7) << 14) & 0x3FE0000 | 0x15i64,
+    0x48: "HvlMapGpaPages",                                                 # LODWORD(a6) = 75;
     0x4E: 'HvlpCreateRootVirtualProcessor',
-    # HvcallInitInputControl(0x4E, &v15); v11 = HvcallInitiateHypercall(v15, v9, 0i64, v10);
     0x6E: "HvlMapSparseGpaPages",
-    # LODWORD(a5) = 110; "v30": "HvlNotifyPageHeat",  v11 = 0x8003i64; HIDWORD(v30) =    # HIDWORD(v11) ^ ((unsigned __int16)v13 ^ WORD2(v11)) & 0xFFF;
-    0x7C: "HvlMapDeviceInterrupt",  # HvcallInitiateHypercall(((v10 + 7) << 14) & 0x3FE0000 | 0x7Ci64
-    0x7F: "HvlRetargetDeviceInterrupt",  # v18 = 127i64;
-    0x82: "HvlRegisterDeviceId",  # HvcallInitiateHypercall((v6 << 14) & 0x3FE0000 | 0x82i64
-
-    0x88: 'HvlLpReadMultipleMsr',  # LODWORD(v17) = 136;
-    0x89: "HvlLpWriteMultipleMsr",  # LODWORD(v16) = 137;
-    0xA1: "HvlpSlowFlushPasidAddressList",  # LODWORD(v14) = 161; HvcallInitiateHypercall(v14, v17, 0i64, v9);
+    0x7C: "HvlMapDeviceInterrupt",                                          # HvcallInitiateHypercall(((v10 + 7) << 14) & 0x3FE0000 | 0x7Ci64
+    0x7F: "HvlRetargetDeviceInterrupt",                                     # v18 = 127i64;
+    0x82: "HvlRegisterDeviceId",                                            # HvcallInitiateHypercall((v6 << 14) & 0x3FE0000 | 0x82i64
+    0x88: 'HvlLpReadMultipleMsr',                                           # LODWORD(v17) = 136;
+    0x89: "HvlLpWriteMultipleMsr",                                          # LODWORD(v16) = 137;
+    0xA1: "HvlpSlowFlushPasidAddressList",                                  # LODWORD(v14) = 161; HvcallInitiateHypercall(v14, v17, 0i64, v9);
     0xA6: 'HvlpSlowAcknowledgePageRequest',
-    # LODWORD(v12) = 166; # HvlpAffinityToHvProcessorSet ((v10 + 7) << 14) & 0x3FE0000 | 0x14; HvcallFastExtended(v13 | 0x10000
-    0xB3: "HvlDmaMapDeviceLogicalRange",  # v17 = 0xB3;
-    # v15 = HvcallFastExtended(v19, (unsigned int)&v18, 0x10, 0, 0);
-    0xBC: "HvlpAddRemovePhysicalMemory",  # v10 = 0x100BC;v19 = v10;
-    0xC7: "HvlDmaMapDeviceSparsePages",  # v12 = 199;
-    0xC8: "HvlDmaUnmapDeviceSparsePages",  # v12 = 200;
-    0xCA: 'HvlGetSparseGpaPagesAccessState',  # LODWORD(v27) = 202;
-    0xDB: "HvlChangeIsolatedMemoryVisibility",  # LODWORD(v20) = 219;
+    0xB3: "HvlDmaMapDeviceLogicalRange",                                    # v17 = 0xB3;
+    0xBC: "HvlpAddRemovePhysicalMemory",                                    # v10 = 0x100BC;v19 = v10;
+    0xC7: "HvlDmaMapDeviceSparsePages",                                     # v12 = 199;
+    0xC8: "HvlDmaUnmapDeviceSparsePages",                                   # v12 = 200;
+    0xCA: 'HvlGetSparseGpaPagesAccessState',                                # LODWORD(v27) = 202;
+    0xDB: "HvlChangeIsolatedMemoryVisibility"                               # LODWORD(v20) = 219;
 }
 
+#
 # ntoskrnl, build 10.0.20344.1
+#
+
 g_hardcoded_hvcalls_10_0_20344_1 = {
-    0x7: "HvlpDynamicUpdateMicrocode",  # HvcallFastExtended(v12, (unsigned int)&v13, HvcallInitInputControl(7i64
-    0x10013: "HvlpFastFlushAddressSpaceTbEx",  # HvcallFastExtended(((v4 + 7) << 14) & 0x3FE0000 | 0x10013u,
-    0x10014: "HvlpFastFlushListTbEx",  # v13 = ((v10 + 7) << 14) & 0x3FE0000 | 0x14; HvcallFastExtended(v13 | 0x10000,
-    0x8003: "HvlNotifyPageHeat",  # v11 = 0x8003i64;
+    0x7:     "HvlpDynamicUpdateMicrocode",                                  # HvcallFastExtended(v12, (unsigned int)&v13, HvcallInitInputControl(7i64
+    0x10013: "HvlpFastFlushAddressSpaceTbEx",                               # HvcallFastExtended(((v4 + 7) << 14) & 0x3FE0000 | 0x10013u,
+    0x10014: "HvlpFastFlushListTbEx",                                       # v13 = ((v10 + 7) << 14) & 0x3FE0000 | 0x14; HvcallFastExtended(v13 | 0x10000,
+    0x8003:  "HvlNotifyPageHeat"                                            # v11 = 0x8003i64;
 }
+
+#
+# ntoskrnl, build 10.0.19041.1052
+#
 
 g_hardcoded_hvcalls_10_0_19041_1052 = {
-    0x7: "HvlpCondenseMicrocode",  # HvcallInitInputControl(7i64, &v2);
-    0x48: "HvlpDepositPages",  # LODWORD(v26) = 0x48; HvcallInitiateHypercall(v26,
+    0x7: "HvlpCondenseMicrocode",                                           # HvcallInitInputControl(7i64, &v2);
+    0x48: "HvlpDepositPages"                                                # LODWORD(v26) = 0x48; HvcallInitiateHypercall(v26,
 }
 
 g_hardcoded_hvcalls = [
@@ -71,7 +88,9 @@ g_current_dir = str(pathlib.Path(__file__).parent.resolve())
 #
 
 g_hvcall_dir_saving = g_current_dir + "\\hvcalls_json_files\\"
-g_hvcall_unknown_dir_saving = g_hvcall_dir_saving + "\\unknown\\"
+g_hvcall_unknown_dir_saving = g_hvcall_dir_saving + "unknown\\"
+
+print("g_current_dir: ", g_current_dir)
 
 #
 # import Idahunt module
@@ -85,6 +104,7 @@ g_idb_name = ida_helper.get_idb_name()
 g_hvcall_dict = {}
 g_hvcall_dict_unknown = {}
 g_hvcall_dict_unknown_index = 0
+g_duplicate_prefix = 0xFFFF00000000
 
 # hvcall_file_path = g_current_dir + "\\hvcalls_dict.json"
 
@@ -108,12 +128,6 @@ def load_dict_from_file(file_path):
     print(file)
     return hv_dict
 
-
-#
-#  script is used for modules winhvr.sys, winhv.sys, securekernel.exe, ntoskrnl.exe
-#  P.S. many functions inside export of winhvr.sys doesn't use hypercalls
-#
-
 def get_function_name_by_address(fn_address):
     hvcall_name = idc.get_func_name(fn_address)
 
@@ -125,12 +139,14 @@ def get_function_name_by_address(fn_address):
 
 
 def get_function_with_params(hv_decompile, hvcall_aux_fn_name):
+
     #
     # first, find end of function params. It is ")" or ");"
     #
 
     hvcall_start = hv_decompile.find(hvcall_aux_fn_name) + len(hvcall_aux_fn_name) + 1
-    hvcall_end = hv_decompile.find(");", hvcall_start) + 2  # -1 will be returned in error
+    #hvcall_end = hv_decompile.find(");", hvcall_start) + 2  
+    hvcall_end = hv_decompile.find(");", hvcall_start) + 1  # -1 will be returned in error, but ")" can be returned at the end of parameter. Return to +1 instead of +2
 
     print("hvcall_start:", hvcall_start)
     print("hvcall_end:", hvcall_end)
@@ -252,12 +268,11 @@ def get_hvcall_from_decompiler_result(hvcall_aux_fn_name, fn_address, arg_number
 
         param_string = get_function_with_params(hv_decompile, hvcall_aux_fn_name)
 
-        print(hvcall_aux_fn_name + ". param_string:" + param_string + "hvcall_name:" + hvcall_name)
+        print(hvcall_aux_fn_name + ". param_string:" + param_string + ". hvcall_name: " + hvcall_name)
 
         #
         # parsing digital number of cypher. Function can get 5 or 6 parameters
-        # part of param in hex format like
-        #  "0x4Cu", 219, 80i64, 0xCi64
+        # part of param in hex format like "0x4Cu", 219, 80i64, 0xCi64
         #
 
         param0_right_bound = param_string.find(", ")
@@ -277,7 +292,7 @@ def get_hvcall_from_decompiler_result(hvcall_aux_fn_name, fn_address, arg_number
 
         #
         # parsing different parameters
-        # arg_number - number of arguemtn position in function parameters
+        # arg_number - number of arguments position in function parameters
         #
 
         if arg_number == 0:
@@ -313,7 +328,7 @@ def find_hvcall_by_aux_function_name(fn_name, arg_number, method):
         print("Bad function name")
         return False
 
-    for xref in XrefsTo(fn_address, ida_xref.XREF_ALL):
+    for xref in idautils.XrefsTo(fn_address, ida_xref.XREF_ALL):
 
         # print(xref.type, XrefTypeName(xref.type), 'from', hex(xref.frm), 'to', hex(xref.to))
         hvcall_name = get_function_name_by_address(xref.frm)
@@ -332,6 +347,14 @@ def find_hvcall_by_aux_function_name(fn_name, arg_number, method):
                 if type(hvcall_id) == "str":
                     print("Warning. type of hvcall_id is string:", hvcall_id(), hvcall_name)
 
+                #
+                # we need check if hvcall_id was duplicated. It can be seen in ntoskrnl 10.0.25931.1000
+                #
+
+                if hvcall_id in g_hvcall_dict:
+                    hvcall_id = hvcall_id + g_duplicate_prefix
+                    print("Warning. hvcall_id: ", hvcall_id, " was duplicated in hvcall_name:", hvcall_name, ". New hvcall_id:", hex(hvcall_id))
+                    
                 g_hvcall_dict[hvcall_id] = hvcall_name   # .replace("WinHv", "HvCall")  # we need check hardcoded array
 
             count += 1
@@ -415,11 +438,18 @@ def get_file_version():
 
     return prodver
 
+# main function
+# extract hvcalls from one IDA PRO idb file
 
 def extract_hvcalls():
+
     #
     # winhvr.sys, winhv.sys
     #
+
+    if g_idb_name == "":
+        print("idb name is not specified")
+        return
 
     if (g_idb_name == "winhvr.sys") or (g_idb_name == "winhv.sys"):
         find_hvcall_by_aux_function_name('WinHvpSimplePoolHypercall_CallViaMacro', 1, "decompile")
@@ -452,7 +482,7 @@ def extract_hvcalls():
     # if you copy idb from another place you can have error with pathM which are stored in idb file
     #
 
-    filename = g_hvcall_dir_saving + ida_helper.get_idb_name() + "_" + fv + ".json"
+    filename = g_hvcall_dir_saving+ida_helper.get_idb_name() + "_" + fv + ".json"
     hvcall_dict = str_key_to_int_with_sorting(g_hvcall_dict)
     save_dict_to_file(filename, hvcall_dict)
 
@@ -472,6 +502,7 @@ def extract_hvcalls():
     print("idb", g_idb_name)
 
 
+#dbg.bp(name=="extract_hvcalls", f"found bp")
 extract_hvcalls()
 
 if g_script_args > 0:
