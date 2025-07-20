@@ -1,5 +1,5 @@
 # Spider Stone
-Windows Optional Feature Files Finder and Extractor (v0.0.1)
+Windows Optional Feature Files Finder and Extractor for Hyper-V components
 
 ![](./images/image001.png)
 
@@ -7,54 +7,69 @@ Windows Optional Feature Files Finder and Extractor (v0.0.1)
 
 ## Script Overview
 
-Extracts and analyzes Windows Optional Feature manifest files from the system registry and WinSxS store.
+Extracts and analyzes Windows Optional Feature manifest files from the system registry and WinSxS store (specially for Hyper-V components)
 
----
 
-### Requirements
- PowerShell 5.0 or later  
- wcpex utility for decoding Windows manifest files: https://github.com/smx-smx/wcpex  
+## Requirements
 
----
+- **PowerShell**: Version 7.0 or higher
+- **Module**: WCPExtractor.psm1 (must be in the same directory as the script)
+- **Privileges**: Administrator rights may be required for accessing system files
+- **OS**: Windows 10/11 or Windows Server
+- **Architecture**: AMD64 and ARM64
 
-### Description
-This script identifies, extracts, and analyzes Windows Optional Feature manifest files from the system. It searches the Windows registry for feature-related packages, copies the corresponding manifest files from the WinSxS store to separate folder and aggregate information from this files in table.
+## Installation
 
-### Requirements
-- **Administrator Privileges**: Required for registry access
-- **Windows OS**: Designed for Windows systems with WinSxS store
-- **wcpex.exe**: Must be present in script directory for extraction
-- **PowerShell 5.0+**: With .NET XML processing capabilities
+1. Download `Spider_Stone.ps1` from that repository
+2. Place `WCPExtractor.psm1` (based on https://github.com/smx-smx/wcpex/) in the same directory 
+3. Open PowerShell 7+ as Administrator
+4. Navigate to the script directory
+5. Run the script with desired parameters
 
 ### Parameters
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `FeatureName` | String | Yes | - | Name of the Windows Optional Feature |
-| `OutputDirectory` | String | No | `".\OptionalFeatureFiles"` | Directory for extracted files |
-| `VerboseOutput` | Switch | No | `$false` | Enable detailed progress output |
+| Parameter        | Type | Description | Default |
+|------------------|------|-------------|---------|
+| `-FeatureName` | string | Name of the Windows Optional Feature to analyze | - |
+| `-OutputDirectory` | string | Directory where manifest files will be copied and extracted | `.\OptionalFeatureFiles` |
+| `-VerboseOutput` | switch | Enable verbose output for detailed logging | `$false` |
+| `-ParsingMum` | switch | Enable parsing of MUM files from servicing packages (show lists of MUM-files in console output) | `$false` |
+| `-NotShowGridView` | switch | Do not display results in GridView | `$false` |
+| `-PathToWcp` | string | Full path to the wcp.dll file to use for extraction | - |
+| `-SearchWcpDll` | switch | Search for the latest version of wcp.dll using WCPExtractor | `$false` |
+| `-Help`, `-?` | switch | Show help information | `$false` |
 
 ### Usage Examples
 
+#### Show all installed optional features
 ```powershell
-# Extract WSL (Windows Subsystem for Linux) manifests
-.\Spider-Stone.ps1 -FeatureName "Microsoft-Windows-Subsystem-Linux"
-
-# Custom output directory with verbose logging
-.\Spider-Stone.ps1 -FeatureName "Microsoft-Windows-Subsystem-Linux" -OutputDirectory "C:\WSLManifests" -VerboseOutput
-
-# Extract Telnet client manifests
-.\Spider-Stone.ps1 -FeatureName "TelnetClient" -OutputDirectory ".\TelnetFiles" -VerboseOutput
-
-# Extract Hyper-V feature manifests
-.\Spider-Stone.ps1 -FeatureName "Microsoft-Hyper-V" -VerboseOutput
+.\Spider_Stone.ps1
 ```
 
-### Process Flow
-1. **Registry Validation**: Checks if feature exists in OptionalFeatures registry
-2. **Manifest Copy**: Copies found manifest files to output directory
-3. **File Extraction**: Uses wcpex.exe to extract compressed manifests
-4. **Content Analysis**: Parses extracted files and displays results in Powershell GridView
+#### Analyze a specific feature
+```powershell
+.\Spider_Stone.ps1 -FeatureName "Microsoft-Hyper-V"
+```
+
+#### Analyze with verbose output and MUM parsing
+```powershell
+.\Spider_Stone.ps1 -FeatureName "Microsoft-Hyper-V" -ParsingMum -VerboseOutput
+```
+
+#### Export to custom directory without GridView
+```powershell
+.\Spider_Stone.ps1 -FeatureName "Microsoft-Hyper-V" -OutputDirectory "C:\Temp\Features" -NotShowGridView
+```
+
+#### Use specific wcp.dll for extraction
+```powershell
+.\Spider_Stone.ps1 -FeatureName "Microsoft-Hyper-V" -PathToWcp "C:\Windows\System32\wcp.dll"
+```
+
+#### Search for wcp.dll before analysis
+```powershell
+.\Spider_Stone.ps1 -SearchWcpDll -FeatureName Microsoft-Hyper-V"
+```
 
 ### Output Files
 - **\*.manifest**: Original compressed manifest files
@@ -63,52 +78,31 @@ This script identifies, extracts, and analyzes Windows Optional Feature manifest
 
 ---
 
-## Common Requirements
-
-### System Requirements
-- Windows 10/11 or Windows Server 2016+
-- PowerShell 5.0 or later
-- Administrator privileges (for Feature Extractor)
-
-### Dependencies
-- **XML Processing**: Built-in .NET XML capabilities
-- **wcpex.exe**: Required for manifest decoding
-- **Registry Access**: HKLM access for Feature Extractor
-
-## Installation
-
-1. Download the PowerShell script files
-2. For Feature Extractor: Place `wcpex.exe` (and wcp.dll - see README file of that utility for using) in the same directory
-3. Run PowerShell as Administrator (for Feature Extractor)
-4. Execute scripts with appropriate parameters
-
 ## Contributing
 
-When modifying these scripts:
-1. Maintain backward compatibility
-2. Add appropriate error handling
-3. Update parameter documentation
-4. Test with various input scenarios
-5. Follow PowerShell best practices
+Contributing are welcome
 
 ## Version History
 
-### XML to CSV Parser
-- **Current**: Initial Spider Stone release with comprehensive XML flattening
+0.0.1  
+  * Initial release  
 
-### Feature Manifest Extractor
-- **v0.0.1**: Initial Spider Stone release with registry search and manifest extraction
+0.0.2  
+  * Added additional parameters (SearchWcpDll, PathToWcp, NotShowGridView)
+  * replaced wcpex.dll to WCPExtractor.psm1 
+
 
 ## Support
 
 For issues or questions:
 1. Check error messages for specific guidance
-2. Verify administrator privileges (Feature Extractor)
-3. Ensure all dependencies are present
-4. Review verbose output for detailed information
+2. Verify administrator privileges
+3. Ensure all dependencies are present (Powershell 7+)
+4. Review verbose output for detailed information (-VerboseOutput)
 
-## License
+## Licenses
 
-GPL3
+GPL3 for Spider Stone
+Zlib license for WCPExtractor.psm1
 
 #AI generated
