@@ -5,10 +5,9 @@ Windows Optional Feature Files Finder and Extractor for Hyper-V components
 
 ![](./images/image002.png)
 
-## Script Overview
+## Script overview
 
 Extracts and analyzes Windows Optional Feature manifest files from the system registry and WinSxS store (specially for Hyper-V components)
-
 
 ## Requirements
 
@@ -30,13 +29,13 @@ Extracts and analyzes Windows Optional Feature manifest files from the system re
 
 | Parameter        | Type | Description | Default |
 |------------------|------|-------------|---------|
-| `-FeatureName` | string | Name of the Windows Optional Feature to analyze | - |
-| `-OutputDirectory` | string | Directory where manifest files will be copied and extracted | `.\OptionalFeatureFiles` |
-| `-VerboseOutput` | switch | Enable verbose output for detailed logging | `$false` |
-| `-ParsingMum` | switch | Enable parsing of MUM files from servicing packages (show lists of MUM-files in console output) | `$false` |
-| `-NotShowGridView` | switch | Do not display results in GridView | `$false` |
-| `-PathToWcp` | string | Full path to the wcp.dll file to use for extraction | - |
-| `-SearchWcpDll` | switch | Search for the latest version of wcp.dll using WCPExtractor | `$false` |
+| `FeatureName` | string | Name of the Windows Optional Feature to analyze | - |
+| `OutputDirectory` | string | Directory where manifest files will be copied and extracted | `.\OptionalFeatureFiles` |
+| `VerboseOutput` | switch | Enable verbose output for detailed logging | `$false` |
+| `ParsingMum` | switch | Enable parsing of MUM files from servicing packages (show lists of MUM-files in console output) | `$false` |
+| `NotShowGridView` | switch | Do not display results in GridView | `$false` |
+| `PathToWcp` | string | Full path to the wcp.dll file to use for extraction | - |
+| `SearchWcpDll` | switch | Search for the latest version of wcp.dll using WCPExtractor | `$false` |
 | `-Help`, `-?` | switch | Show help information | `$false` |
 
 ### Usage Examples
@@ -68,15 +67,14 @@ Extracts and analyzes Windows Optional Feature manifest files from the system re
 
 #### Search for wcp.dll before analysis
 ```powershell
-.\Spider_Stone.ps1 -SearchWcpDll -FeatureName Microsoft-Hyper-V"
+.\Spider_Stone.ps1 -SearchWcpDll
 ```
 
 ### Output Files
 - **\*.manifest**: Original compressed manifest files
 - **\*.manifest.extracted**: Decompressed XML content
 - **GridView Display**: Interactive table showing file information
-
----
+- **csv-files**: output information
 
 ## Contributing
 
@@ -102,7 +100,7 @@ For issues or questions:
 
 ## Licenses
 
-GPL3 for Spider Stone
-Zlib license for WCPExtractor.psm1
+GPL3 for Spider Stone  
+Zlib license for WCPExtractor.psm1  
 
 #AI generated
