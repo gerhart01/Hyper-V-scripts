@@ -88,6 +88,9 @@ Contributing are welcome
 0.0.2  
   * Added additional parameters (SearchWcpDll, PathToWcp, NotShowGridView)
   * replaced wcpex.dll to WCPExtractor.psm1 
+ 
+0.0.3
+  * Update license for WCPExtractor.psm1 
 
 
 ## Support
@@ -101,6 +104,5 @@ For issues or questions:
 ## Licenses
 
 GPL3 for Spider Stone  
-Zlib license for WCPExtractor.psm1  
 
 #AI generated
