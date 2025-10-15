@@ -7,8 +7,8 @@ Different scripts for Microsoft Hyper-V internals researches. Folder ida75 conta
 - CreatemVmcallHandlersTable2016.py - IDA Python script for extracting hvcalls from hvix64.exe, hvax64.exe Windows Server 2016
 - CreatemVmcallHandlersTable2019.py - IDA Python script for extracting hvcalls from hvix64.exe, hvax64.exe Windows Server 2019
 
-For latest Windows versions (Windows Server 2022 and Windows 11) and older Windows version with fresh patches, i recommend to use extract_hvcalls or extract_hvcalls_gui scripts, which are dynamically extract new hypercalls.
-Extract hvcalls gui video demonstration: https://www.youtube.com/watch?v=ohO4Hs4y59M 
+For latest Windows versions (Windows Server 2025 and Windows 11) and older Windows version with fresh patches, i recommend to use Hvcall GUI C# app launcher for python scripts, which are dynamically extract hypercalls.
+Extract hvcalls gui (later Hvcall GUI) video demonstration: https://www.youtube.com/watch?v=ohO4Hs4y59M or read that document: 
 
 Some of scripts are using pykd: https://githomelab.ru/pykd/pykd/-/wikis/home.
 If server is unavailable, you can use next instructions for pykd launching:
@@ -26,10 +26,12 @@ If server is unavailable, you can use next instructions for pykd launching:
     !py path_to_script
     ```
 
-ParseAfdEndpointListHead.py - script for parsing afd!AfdEndpointListHead structure (WinDBG + pykd)
+or see that resource: https://github.com/ivellioscolin/pykd
+
+ParseAfdEndpointListHead.py - script for parsing afd!AfdEndpointListHead structure (WinDBG or WinDBG (classic), kd + pykd)
 
 ![](./images/image001.png)
 
-ParseAfdTlTransportListHead.py - script for parsing afd!AfdTlTransportListHead (WinDBG + pykd)
+ParseAfdTlTransportListHead.py - script for parsing afd!AfdTlTransportListHead (WinDBG or WinDBG (classic), kd + pykd)
 
 ![](./images/image002.png)

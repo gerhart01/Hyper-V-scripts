@@ -1,56 +1,71 @@
 __author__ = "Gerhart"
 __license__ = "GPL3"
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
-# based on http://www.codemachine.com/article_findafdendpoints.html
-# list afd endpoints with some additional info. Hyper-V sockets endpoints are included.
-# Use pykd WinDBG extension for script execution
+# Based on http://www.codemachine.com/article_findafdendpoints.html
+# list afd.sys driver endpoints with some additional information. Hyper-V sockets endpoints are included.
+# Use pykd WinDBG extension for script execution.
+# Latest original available pykd version for python 3.9, but you can try to use fork https://github.com/ivellioscolin/pykd (python 3.13 was announce, when that script was published)
 
 from pykd import *
 import sys
 
-win2019 = False
-win11 = False
-win2022 = False
+EPROCESS_OBJ_OFFSET 	= 0
+ACTIVE_PROCESS 			= 0
+AFD_ENDPOINT_OFFSET 	= 0
+FN_SYMBOL_NAME 			= 0
+IMAGE_NAME 				= 0
 
-EPROCESS_AFD_OFFSET = 0x28
-ACTIVE_PROCESS = 0
-AFD_ENDPOINT_OFFSET = 0
-FN_SYMBOL_NAME = 0
-IMAGE_NAME = 0
+def findEprocessOffset(AfdEndpoint):
 
-if win2019:
-	AFD_ENDPOINT_OFFSET = 0x120
-	FN_SYMBOL_NAME = 0x108
-	IMAGE_NAME = 0x450
+	global AFD_ENDPOINT_OFFSET
 
-if win11:
-	AFD_ENDPOINT_OFFSET = 0x130
-	FN_SYMBOL_NAME = 0x118
-	IMAGE_NAME = 0x5a8
-if win2022:
-	AFD_ENDPOINT_OFFSET = 0x120
-	FN_SYMBOL_NAME = 0x108
-	IMAGE_NAME = 0x5a8
+	ptrProcessStart     = 0x20
+	ptrProcessEnd       = 0x40
+
+	for i in range(AfdEndpoint + ptrProcessStart - AFD_ENDPOINT_OFFSET, AfdEndpoint + ptrProcessEnd - AFD_ENDPOINT_OFFSET):
+
+		eprocessPtr = ptrQWord(i)
+		
+		try:
+			eprocessFlags = ptrQWord(eprocessPtr)
+		except:
+			continue
+
+		if eprocessFlags == 3:
+
+			global EPROCESS_OBJ_OFFSET
+			EPROCESS_OBJ_OFFSET = i - (AfdEndpoint - AFD_ENDPOINT_OFFSET)
+
+			print("EPROCESS_OBJ_OFFSET: " + hex(EPROCESS_OBJ_OFFSET) + ". Address: ", hex(i))
+
+			return
 
 
 def findAfdOffset(AfdEndpoint):
-	afdOffsetEnd = 0x110
-	afdOffsetBegin = 0x150
-	for i in range(AfdEndpoint-afdOffsetBegin, AfdEndpoint-afdOffsetEnd):
+
+	afdOffsetEnd     = 0x100
+	afdOffsetBegin   = 0x180
+
+	for i in range(AfdEndpoint - afdOffsetBegin, AfdEndpoint - afdOffsetEnd):
 
 		afd = pykd.ptrWord(i) & 0xafd0
 
 		if (afd == 0xafd0): 
-			print("found afd offset ", hex(AfdEndpoint - i))
+
 			global AFD_ENDPOINT_OFFSET
 			AFD_ENDPOINT_OFFSET = AfdEndpoint - i
+
+			print("Found afd offset (AFD_ENDPOINT_OFFSET): " + hex(AfdEndpoint - i) + ". Address: " + hex(i))
+
 			return
 
 def findProviderSymbolOffset(AfdEndpoint):
-	provNameOffsetEnd = 0x100
-	provNameOffsetBegin = 0x140
-	for i in range(AfdEndpoint-provNameOffsetBegin, AfdEndpoint-provNameOffsetEnd):
+
+	provNameOffsetEnd    = 0x90
+	provNameOffsetBegin  = 0x160
+
+	for i in range(AfdEndpoint - provNameOffsetBegin, AfdEndpoint - provNameOffsetEnd):
 		prvName = ""
 
 		try:
@@ -59,9 +74,11 @@ def findProviderSymbolOffset(AfdEndpoint):
 			continue
 
 		if prvName.find("Provider") != -1:
+
 			global FN_SYMBOL_NAME
 			FN_SYMBOL_NAME = AfdEndpoint - i
-			print("FN_SYMBOL_NAME: ", hex(FN_SYMBOL_NAME))
+
+			print("FN_SYMBOL_NAME: " + hex(FN_SYMBOL_NAME) + ". Address: ", hex(pykd.ptrQWord(i)))
 
 def findFieldOffset(structName, fieldName):
 
@@ -78,20 +95,23 @@ def findFieldOffset(structName, fieldName):
 
 
 def findEprocessFieldOffset():
+
 	global ACTIVE_PROCESS
 	global IMAGE_NAME
+
 	ACTIVE_PROCESS = findFieldOffset("nt!_EPROCESS","ActiveProcessLinks")
 	IMAGE_NAME = findFieldOffset("nt!_EPROCESS","ImageFileName")
 
 
 def findOffsets(AfdEndpoint):
+
 	findAfdOffset(AfdEndpoint)
 	findProviderSymbolOffset(AfdEndpoint)
 	findEprocessFieldOffset()
+	findEprocessOffset(AfdEndpoint)
 
 
-
-print("Script for AfdEndpointList head parsing")
+print("Script for AfdEndpointList parsing")
 print("Executing .reload command ...")
 pykd.dbgCommand(".reload")
 
@@ -99,14 +119,15 @@ afd = module("afd")
 ListHead = afd.AfdEndpointListHead
 
 if ListHead == "":
-	print("Check in WinDBG, if x afd!AfdEndpointListHead symbol name is presented. Try restart WinDBG")
+	print("Check, if afd!AfdEndpointListHead symbol name is presented. Try restart debugger (WinDBG (classic), kd, WinDBG)")
 	exit()
 
 ptrNext = ptrQWord(ListHead)
 findOffsets(ptrNext)
 
-print("afd!AfdEndpointListHead address is ", hex(ListHead))
-print("----AfdEndpoint:", hex(ptrNext), "afd prefix: ", hex(ptrWord(ptrNext-AFD_ENDPOINT_OFFSET)))
+print("afd!AfdEndpointListHead address: " + hex(ListHead))
+print("----AfdEndpoint: "+hex(ptrNext) +". Afd prefix: ", hex(ptrWord(ptrNext - AFD_ENDPOINT_OFFSET)))
+print("-------------------------------------------------------------------------------------------------------------------------")
 
 count = 1
 
@@ -116,14 +137,13 @@ print("")
 
 while (ptrNext != ListHead) & (ptrNext != 0xffffffffffffffff):
 
-	addPtrNext = hex(ptrNext);
-	afdSign = hex(ptrWord(ptrNext-AFD_ENDPOINT_OFFSET))
-	afdProviderFunction = findSymbol(ptrQWord(ptrNext-FN_SYMBOL_NAME))
-	afdProcessName = loadCStr(ptrQWord(ptrNext-AFD_ENDPOINT_OFFSET+EPROCESS_AFD_OFFSET)+IMAGE_NAME)
-	afdActiveProcessLink = hex(ptrQWord(ptrNext-AFD_ENDPOINT_OFFSET+EPROCESS_AFD_OFFSET)+ACTIVE_PROCESS)
-
+	addPtrNext = hex(ptrNext)
+	afdSign = hex(ptrWord(ptrNext - AFD_ENDPOINT_OFFSET))
+	afdProviderFunction = findSymbol(ptrQWord(ptrNext - FN_SYMBOL_NAME))
+	afdProcessName = loadCStr(ptrQWord(ptrNext - AFD_ENDPOINT_OFFSET + EPROCESS_OBJ_OFFSET) + IMAGE_NAME)
+	afdActiveProcessLink = hex(ptrQWord(ptrNext - AFD_ENDPOINT_OFFSET + EPROCESS_OBJ_OFFSET) + ACTIVE_PROCESS)
 	print(format_string.format(addPtrNext, afdSign, afdProviderFunction, afdProcessName, afdActiveProcessLink))
 	ptrNext = ptrQWord(ptrNext)
-	count = count+1
+	count = count + 1
 
 print("Cycle end. Count", count)
