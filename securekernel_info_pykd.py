@@ -318,7 +318,7 @@ def list_sk_variables():
 def main():
     """Main dispatcher function"""
     parser = argparse.ArgumentParser(
-        description="Kernel debugging and analysis tool",
+        description="Secure Kernel debugging and analysis tool",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
