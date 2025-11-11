@@ -212,6 +212,50 @@ def print_variable(obj_securnt, varName, size):
     print(varName+":", varValue)
     return
 
+def sar_5(value):
+
+    res_value = value >> 5
+    res_value = res_value | 0xF800000000000000
+
+    return res_value
+
+def decypher_ski_secure_service_table():
+
+    obj_securnt = find_securekernel_base()
+
+    if obj_securnt == 0:
+        return
+
+    SkiSecureServiceTable = obj_securnt.SkiSecureServiceTable
+    print("SkiSecureServiceTable:",hex(SkiSecureServiceTable))
+
+    SkiSecureServiceLimit = pykd.ptrDWord(obj_securnt.SkiSecureServiceLimit)
+    print("SkiSecureServiceLimit:",hex(SkiSecureServiceLimit))
+
+    count = 0
+
+    while (count < SkiSecureServiceLimit):
+
+        compact_sk_syscall = pykd.ptrDWord(SkiSecureServiceTable + count * 4)
+
+        # movsxd  r11, dword ptr [r10+rax*4]
+        
+        deciphered_value = (0xFFFFFFFF00000000+compact_sk_syscall) & 0xFFFFFFFFFFFFFFFF
+
+        # sar     r11, 5
+
+        deciphered_value = sar_5(deciphered_value)
+
+        # add     r10, r11
+
+        deciphered_value = (deciphered_value + SkiSecureServiceTable) & 0xFFFFFFFFFFFFFFFF
+
+        result_string = hex(count)+". Compact syscall: "+hex(compact_sk_syscall)+". Deciphered syscall: "+findSymbol(deciphered_value)
+
+        print(result_string)
+
+        count+=1
+        
 
 def list_sk_variables():
     
@@ -313,7 +357,7 @@ def list_sk_variables():
     print_variable(obj_securnt, "SkmmPteBase", 8)
     print_variable(obj_securnt, "SkmmUserProbeAddress", 8)
     print_variable(obj_securnt, "SkmmSystemRangeStart", 8)
-    print_variable(obj_securnt, "SkmmHighestUserAddress", 8)        
+    print_variable(obj_securnt, "SkmmHighestUserAddress", 8)    
 
 def main():
     """Main dispatcher function"""
@@ -324,7 +368,7 @@ def main():
     
     parser.add_argument(
         'command',
-        choices=['idt', 'modules', 'syscalls', 'skprocess', 'skvars'],
+        choices=['idt', 'modules', 'syscalls', 'skprocess', 'skvars', 'decypher_ssst'],
         help='Command to execute'
     )
     
@@ -342,7 +386,8 @@ def main():
         'modules': list_loaded_modules,
         'syscalls': list_syscall_entries,
         'skprocess': list_sk_process,
-        'skvars': list_sk_variables
+        'skvars': list_sk_variables,
+        'decypher_ssst': decypher_ski_secure_service_table
     }
     
     # Execute the selected function
