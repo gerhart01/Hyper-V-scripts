@@ -1,19 +1,19 @@
-__author__ = "Gerhart"
-__license__ = "GPL3"
-__version__ = "1.2.0"
 
-#
-# developed by @gerhart_x
-#
+__author__ = "Arthur Khudyaev (www.x.com/gerhart_x)"
+__license__ = "GPL3"
+__version__ = "1.4.0"
 
 #
 # some variables was taken from
 # https://pdfs.semanticscholar.org/e275/cc28c5c8e8e158c45e5e773d0fa3da01e118.pdf
 #
+# Example: "!py -g securekernel_parse_pykd.py skvars"
+#
 
-
-from pykd import *
+import argparse
 import sys
+from pykd import *
+
 
 def find_securekernel_base():
     try:
@@ -40,13 +40,13 @@ def parse_idt_table():
             print("securekernel.exe module is not found")
     
     idtr = reg("idtr")
-    # idtr = 0xfffff80224148970
+
     print("idtr = ", hex(idtr))
     i = 256
     count = 0
     for i in range(0, 256):
         buf = loadBytes(idtr+16*i, 16)
-        if buf[2] != 0: #idtEntry.Selector
+        if buf[2] != 0: 
             #print "IDT selector %x" % buf[2]
             isr = 0
             isr = isr + (buf[11] << (8*7))
@@ -70,8 +70,8 @@ def parse_idt_table():
 
 def list_loaded_modules():
 
-	# 
-	# some info was taken from 
+    # 
+	# some information was taken from 
 	# https://github.com/Cr4sh/s6_pcie_microblaze/blob/master/python/payloads/DmaBackdoorHv/backdoor_client/backdoor_client/backdoor_client.cpp
 	# 
     
@@ -121,7 +121,7 @@ def list_syscall_entries():
 
     IumSyscallDispEntries = obj_securnt.IumSyscallDispEntries
 
-    print("IumSyscallDispEntries:", hex(IumSyscallDispEntries))
+    print("IumSyscallDispEntries: ", hex(IumSyscallDispEntries))
 
     break_cycle = False
     i = 0
@@ -162,8 +162,6 @@ def get_process_name_by_pid(pid):
 
 def list_sk_process():
 
-	# https://github.com/Cr4sh/s6_pcie_microblaze/blob/master/python/payloads/DmaBackdoorHv/backdoor_client/backdoor_client/backdoor_client.cpp
-
     obj_securnt = find_securekernel_base()
 
     if obj_securnt == 0:
@@ -180,6 +178,41 @@ def list_sk_process():
     a = pykd.getNumberProcesses()
     print(a)
 
+def print_ascii_string_variable(obj_securnt, varName):
+    try:
+        x = getattr(obj_securnt, varName)
+    except:
+        print("Variable " + varName + " is not presented in current version of securekernel")
+        return
+    
+    #varAddress = hex(pykd.ptrQWord(x))
+    varValue = pykd.loadCStr(x)
+
+    print(varName+":", varValue)
+
+
+def print_variable(obj_securnt, varName, size):
+    
+    try:
+        x = getattr(obj_securnt, varName)
+    except:
+        print("Variable " + varName + " is not presented in current version of securekernel")
+        return
+
+    varValue = ""
+    if size == 1:
+        varValue = hex(pykd.ptrByte(x))
+    if size == 2:
+        varValue = hex(pykd.ptrWord(x))
+    if size == 4:
+        varValue = hex(pykd.ptrDWord(x))
+    if size == 8:
+        varValue = hex(pykd.ptrQWord(x))
+
+    print(varName+":", varValue)
+    return
+
+
 def list_sk_variables():
     
     obj_securnt = find_securekernel_base()
@@ -187,94 +220,141 @@ def list_sk_variables():
     if obj_securnt == 0:
         return
 
-    SkpsSystemDirectoryTableBase = pykd.ptrQWord(obj_securnt.SkpsSystemDirectoryTableBase)
-    print("SkpsSystemDirectoryTableBase:", hex(SkpsSystemDirectoryTableBase))
+    print_ascii_string_variable(obj_securnt, "SkBuildLab")
+    print_variable(obj_securnt, "CmNtCSDVersion", 8)
+    print_variable(obj_securnt, "SkpsSystemDirectoryTableBase", 8)
+    print_variable(obj_securnt, "SkImageBase", 8)
+    print_variable(obj_securnt, "SkeLoaderBlock", 8)
+    print_variable(obj_securnt, "IumSyscallDescriptor", 4)
+    print_variable(obj_securnt, "IumSyscallCustomApiFcnTable", 8)
+    print_variable(obj_securnt, "ShvlpFlags", 4)
+    print_variable(obj_securnt, "SkeProcessorBlock", 8)
+    print_variable(obj_securnt, "SkpKernelVtl0BufferBase", 8)
+    print_variable(obj_securnt, "SkpKernelVtl1BufferBase", 8)
+    print_variable(obj_securnt, "SkpKernelVtl0BufferLock", 4)
+    print_variable(obj_securnt, "SkpKernelVtl0BufferHint", 4)
+    print_variable(obj_securnt, "SkpNtosUserSharedData", 8)
+    print_variable(obj_securnt, "SkmiCodeIntegrityData", 8)
+    print_variable(obj_securnt, "SkmiCodeIntegrityDataSize", 4)
+    print_variable(obj_securnt, "SkmiImageTableSize", 4)
+    print_variable(obj_securnt, "SkobpGlobalHandleTable", 8)
+    print_variable(obj_securnt, "SkiNtosIdt", 8)
+    print_variable(obj_securnt, "IumLkArrayHandle", 8)
+    print_variable(obj_securnt, "IumIdkSigningHandle", 8)
+    print_variable(obj_securnt, "IumTpmBindingItemsHandle", 8)
+    print_variable(obj_securnt, "IumLkHandle", 8)
+    print_variable(obj_securnt, "IumHbkHandle", 8)
+    print_variable(obj_securnt, "IumIdkHandle", 8)
+    print_variable(obj_securnt, "IumMkPerBootHandle", 8)
+    print_variable(obj_securnt, "SkeProcessorArchitecture", 2)
+    print_variable(obj_securnt, "SkmiHighestPhysicalPage", 8)
+    print_variable(obj_securnt, "SkmiLowestPhysicalPage", 8)
+    print_variable(obj_securnt, "SkmmNumberOfPhysicalPages", 8)
+    print_variable(obj_securnt, "SkpspNativeDllInfo", 8)
+    print_variable(obj_securnt, "VertdllExports", 8)
+    print_variable(obj_securnt, "NtdllExports", 8)
+    print_variable(obj_securnt, "SkeKernelStackSize", 4)
+    print_variable(obj_securnt, "SkeNtKernelImports", 8)
+    print_variable(obj_securnt, "SkiHyperlaunchEntrypoint", 8)
+    print_variable(obj_securnt, "SkmmNtoskrnlBase", 8)
+    print_variable(obj_securnt, "SkeNtKernelImports", 8)
+    print_variable(obj_securnt, "PsIumSystemProcess", 8)
+    print_variable(obj_securnt, "ShvlpPartitionInfoPage", 8)
+    print_variable(obj_securnt, "ShvlpVpAssistPfn", 8)
+    print_variable(obj_securnt, "ShvlEarlyBootParameterPage", 8)
+    print_variable(obj_securnt, "ShvlpVtlCall", 8)
+    print_variable(obj_securnt, "ShvlpHypercallCodePage", 8)
+    print_variable(obj_securnt, "ShvlpCodePa", 8)
+    print_variable(obj_securnt, "ShvlpEnteredMinimalDispatchLoop", 1)
+    print_variable(obj_securnt, "ShvlpEnlightenmentInfo", 8)
+    print_variable(obj_securnt, "ShvlpHandleExceptionIntercept", 8)
+    print_variable(obj_securnt, "ShvlpReferenceTscPage", 8)
+    print_variable(obj_securnt, "SkiProfileListHead", 8)
+    print_variable(obj_securnt, "SkiLongIpiLog", 8)
+    print_variable(obj_securnt, "SkmiScPrvSecurePool", 8)
+    print_variable(obj_securnt, "RtlpHpHeapGlobals", 8)
+    print_variable(obj_securnt, "SkiInitialPrcbStorage", 1)
+    print_variable(obj_securnt, "NtGlobalFlag", 4)
+    print_variable(obj_securnt, "IumpSingleThreadedServiceRequestEntered", 4)
+    print_variable(obj_securnt, "RtlpInterceptorsCount", 4)
+    print_variable(obj_securnt, "SkhalpEfiRuntimeServicesBlock", 8)
+    print_variable(obj_securnt, "SkmiDriverProxyActiveSwapDelayeedFreeList", 8)
+    print_variable(obj_securnt, "SkhalpDmaEnablerListHead", 8)
+    print_variable(obj_securnt, "SkpnpSdevDeviceTypesAvailable", 4)
+    print_variable(obj_securnt, "SkpnpSdevTable", 8)
+    print_variable(obj_securnt, "SkpsProcessListLock", 4)
+    print_variable(obj_securnt, "SkpsProcessList", 8)
+    print_variable(obj_securnt, "SkpgHotpatchIpiRequest", 8)
+    print_variable(obj_securnt, "SkpgExtentChecksActiveCount", 4)
+    print_variable(obj_securnt, "SkpgHibernateActive", 4)
+    print_variable(obj_securnt, "SkpgPatchGuardTbFlush", 4)
+    print_variable(obj_securnt, "IumSkCrashDumpEncryptionHandle", 8)
+    print_variable(obj_securnt, "IumHvCrashDumpEncryptionHandle", 8)
+    print_variable(obj_securnt, "RtlpPropStoreLock", 4)
+    print_variable(obj_securnt, "RtlpPtrTreeLock", 4)
+    print_variable(obj_securnt, "g_SecureBootActivePlatformManifestSize", 4)
+    print_variable(obj_securnt, "g_SecureBootActivePlatformManifest", 8)
+    print_variable(obj_securnt, "SecurePoolGlobalState", 8)
+    print_variable(obj_securnt, "SkpIcInterceptInstalled", 1)
+    print_variable(obj_securnt, "SkpLiveDumpContext", 4)
+    print_variable(obj_securnt, "SkpWorkItemQueued", 4)
+    print_variable(obj_securnt, "SkpWorkItemList", 8)
+    print_variable(obj_securnt, "SkNtosUserSharedData", 8)
+    print_variable(obj_securnt, "SkPoolAllocationsFailed", 4)
+    print_variable(obj_securnt, "KdpDebuggerDataListHead", 8)
+    print_variable(obj_securnt, "KdDebuggerDataBlock", 8)
+    print_variable(obj_securnt, "KdVersionBlock", 4)
+    print_variable(obj_securnt, "SkmmSystemRangeStart", 8)
+    print_variable(obj_securnt, "SkmmUserProbeAddress", 1)
+    print_variable(obj_securnt, "SkmmPhysicalMemoryBlock", 1)
+    print_variable(obj_securnt, "SkBuildNumber", 4)
+    print_variable(obj_securnt, "SkmmNteBase", 8)
+    print_variable(obj_securnt, "SkmmPfnDatabase", 8)
+    print_variable(obj_securnt, "SkmmPteBase", 8)
+    print_variable(obj_securnt, "SkmmUserProbeAddress", 8)
+    print_variable(obj_securnt, "SkmmSystemRangeStart", 8)
+    print_variable(obj_securnt, "SkmmHighestUserAddress", 8)        
 
-    SkImageBase = pykd.ptrQWord(obj_securnt.SkImageBase)
-    print("SkImageBase:", hex(SkImageBase))
-
-    SkeLoaderBlock = pykd.ptrQWord(obj_securnt.SkeLoaderBlock)
-    print("SkeLoaderBlock:", hex(SkeLoaderBlock))
-
-    IumSyscallDescriptor = obj_securnt.IumSyscallDescriptor
-    print("IumSyscallDescriptor array:", hex(IumSyscallDescriptor))
-
-    IumSyscallCustomApiFcnTable = pykd.ptrQWord(obj_securnt.IumSyscallCustomApiFcnTable)
-    print("IumSyscallCustomApiFcnTable:", hex(IumSyscallCustomApiFcnTable))
-
-    ShvlpFlags = pykd.ptrQWord(obj_securnt.ShvlpFlags)
-    print("ShvlpFlags:",hex(ShvlpFlags))
-
-    SkeProcessorBlock = pykd.ptrQWord(obj_securnt.SkeProcessorBlock)
-    print("SkeProcessorBlock:",hex(SkeProcessorBlock))
-
-    SkpKernelVtl0BufferBase = pykd.ptrQWord(obj_securnt.SkpKernelVtl0BufferBase)
-    print("SkpKernelVtl0BufferBase:",hex(SkpKernelVtl0BufferBase))
-
-    SkpKernelVtl1BufferBase = pykd.ptrQWord(obj_securnt.SkpKernelVtl1BufferBase)
-    print("SkpKernelVtl1BufferBase:",hex(SkpKernelVtl1BufferBase))
-
-    SkpNtosUserSharedData = obj_securnt.SkpNtosUserSharedData
-    print("SkpNtosUserSharedData address:", hex(SkpNtosUserSharedData))
-
-    SkmiImageTableSize = pykd.ptrDWord(obj_securnt.SkmiImageTableSize)
-    print("SkmiImageTableSize:", hex(SkmiImageTableSize))
-
-def sar_5(value):
-
-    res_value = value >> 5
-    res_value = res_value | 0xF800000000000000
-
-    return res_value
-
+def main():
+    """Main dispatcher function"""
+    parser = argparse.ArgumentParser(
+        description="Kernel debugging and analysis tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     
-
-def decypher_ski_secure_service_table():
-
-    obj_securnt = find_securekernel_base()
-
-    if obj_securnt == 0:
-        return
-
-    SkiSecureServiceTable = obj_securnt.SkiSecureServiceTable
-    print("SkiSecureServiceTable:",hex(SkiSecureServiceTable))
-
-    SkiSecureServiceLimit = pykd.ptrDWord(obj_securnt.SkiSecureServiceLimit)
-    print("SkiSecureServiceLimit:",hex(SkiSecureServiceLimit))
-
-    count = 0
-
-    while (count < SkiSecureServiceLimit):
-
-        compact_sk_syscall = pykd.ptrDWord(SkiSecureServiceTable + count * 4)
-
-        # movsxd  r11, dword ptr [r10+rax*4]
-        
-        deciphered_value = (0xFFFFFFFF00000000+compact_sk_syscall) & 0xFFFFFFFFFFFFFFFF
-
-        # sar     r11, 5
-
-        deciphered_value = sar_5(deciphered_value)
-
-        # add     r10, r11
-
-        deciphered_value = (deciphered_value + SkiSecureServiceTable) & 0xFFFFFFFFFFFFFFFF
-
-        result_string = hex(count)+". Compact syscall: "+hex(compact_sk_syscall)+". Deciphered syscall: "+findSymbol(deciphered_value)
-
-        print(result_string)
-
-        count+=1
-
-        
+    parser.add_argument(
+        'command',
+        choices=['idt', 'modules', 'syscalls', 'skprocess', 'skvars'],
+        help='Command to execute'
+    )
     
+    parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='Enable verbose output'
+    )
+    
+    args = parser.parse_args()
+    
+    # Function mapping
+    commands = {
+        'idt': parse_idt_table,
+        'modules': list_loaded_modules,
+        'syscalls': list_syscall_entries,
+        'skprocess': list_sk_process,
+        'skvars': list_sk_variables
+    }
+    
+    # Execute the selected function
+    try:
+        commands[args.command]()
+    except KeyError:
+        print(f"Error: Unknown command '{args.command}'", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error executing {args.command}: {e}", file=sys.stderr)
+        sys.exit(1)
 
-# parse_idt_table()  
-# list_loaded_modules()
-# list_syscall_entries()
-# list_sk_process()
-# list_sk_variables()
-decypher_ski_secure_service_table()
 
-
-
+if __name__ == "__main__":
+    main()
