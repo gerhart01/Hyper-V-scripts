@@ -5,7 +5,6 @@ __version__ = "1.4.0"
 # Based on http://www.codemachine.com/article_findafdendpoints.html
 # list afd.sys driver endpoints with some additional information. Hyper-V sockets endpoints are included.
 # Use pykd WinDBG extension for script execution.
-# Latest original available pykd version for python 3.9, but you can try to use fork https://github.com/ivellioscolin/pykd (python 3.13 was announce, when that script was published)
 
 from pykd import *
 import sys
