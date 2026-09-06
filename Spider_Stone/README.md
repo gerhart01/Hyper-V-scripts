@@ -227,7 +227,3 @@ matching `wcp.dll` selected.
   have no public online description, so `wcp.dll` is loaded at runtime as the source of
   truth (its version/enum may change).
 - The CBS / WinSxS / manifest model is the standard Windows servicing mechanism.
-
-> Honestly: the only external online project a technique was borrowed from is **wcpex**.
-> Everything else is analysis of system structures and standard APIs, with no code copied
-> from the network.
