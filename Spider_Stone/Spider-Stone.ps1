@@ -2,30 +2,62 @@
 
 <#
 .SYNOPSIS
-    Extracts and displays file information from Windows Optional Features
+    Reconstructs the "Optional Feature -> packages -> components -> files" chain and
+    exports the full component footprint to CSV and HTML.
 .DESCRIPTION
-    This script searches for manifest files associated with a Windows Optional Feature,
-    extracts them using WCPExtractor, and displays the file information in a grid view
+    Given a Windows Optional Feature name, the script locates the related packages and
+    WinSxS manifests via Component-Based Servicing (CBS) data, decompresses the
+    WCP-compressed manifests with the WCPExtractor module (wcp.dll), and parses them:
+    files with hashes, dependencies, registry, categories, directories, localization,
+    ETW providers, scheduled tasks and other markers. The result is one CSV per data
+    kind plus a self-contained HTML report. Runs fully locally.
+
+    A bilingual (English + Russian) help screen is available via -Help / -?.
 .PARAMETER FeatureName
-    The name of the Windows Optional Feature to analyze
+    Name of the Windows Optional Feature to analyze. Without it, the script lists the
+    installed features.
 .PARAMETER OutputDirectory
-    The directory where manifest files will be copied and extracted
+    Directory for results (copied manifests, CSV, HTML). Default: .\OptionalFeatureFiles
 .PARAMETER VerboseOutput
-    Enable verbose output
+    Verbose progress logging.
 .PARAMETER ParsingMum
-    Enable parsing of MUM files from servicing packages
+    Recursively parse MUM files from C:\Windows\servicing\Packages.
 .PARAMETER NotShowGridView
-    Do not display results in GridView
+    Do not open the results in Out-GridView.
+.PARAMETER OpenReport
+    Open the generated HTML report in the default browser when the run finishes.
+.PARAMETER ComponentFilter
+    Output only components whose name contains this word (case-insensitive
+    substring). Filters files, dependencies, registry, CSVs, HTML and GridView.
 .PARAMETER PathToWcp
-    Full path to the wcp.dll file to use for extraction
+    Explicit path to wcp.dll used to decompress manifests.
 .PARAMETER SearchWcpDll
-    Search for the latest version of wcp.dll using WCPExtractor module
+    Find and show the latest wcp.dll for the system architecture
+    (WCPExtractor\Find-LatestWCPDll), then exit.
 .PARAMETER Help
-    Show help information
-.VERSION
-    0.0.3
-.AUTHOR
-    Spider Stone
+    Show the built-in help (alias -?).
+.EXAMPLE
+    .\Spider-Stone.ps1
+    List the installed Optional Features.
+.EXAMPLE
+    .\Spider-Stone.ps1 -FeatureName "RSAT" -ParsingMum -VerboseOutput
+    Analyze a feature with recursive MUM parsing and verbose logging.
+.EXAMPLE
+    .\Spider-Stone.ps1 -SearchWcpDll
+    Find the latest wcp.dll for the current architecture.
+.EXAMPLE
+    .\Spider-Stone.ps1 -FeatureName "Containers" -ComponentFilter "Defender"
+    Analyze a feature but output only components whose name contains "Defender".
+.EXAMPLE
+    .\Spider-Stone.ps1 -FeatureName "DiskIo-QoS"
+    Analyze a feature. The HTML report (Report_DiskIo-QoS.html) is generated
+    automatically in the output directory - no separate switch is needed. Its path is
+    printed to the console when the run finishes.
+.NOTES
+    Version : 0.0.2
+    Author  : Spider Stone
+    Requires: PowerShell 7.0+, WCPExtractor.psm1 module in the same folder.
+              Administrator rights recommended (CBS registry, WinSxS files).
 #>
 
 [CmdletBinding()]
@@ -41,7 +73,12 @@ param(
     [switch]$ParsingMum,
     
     [switch]$NotShowGridView,
-    
+
+    [switch]$OpenReport,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ComponentFilter,
+
     [Parameter(Mandatory = $false)]
     [string]$PathToWcp,
     
@@ -52,11 +89,34 @@ param(
     [switch]$Help
 )
 
+#region Console Encoding
+# Force UTF-8 console output so Cyrillic text (progress bars, help, messages) and
+# other non-ASCII names render correctly instead of as "????" on consoles whose
+# active code page is not UTF-8 (the common cause of garbled output). Wrapped in
+# try/catch because redirected or non-interactive hosts can reject the change.
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch {
+    # No real console (output redirected to a file/pipe); text still writes fine.
+}
+#endregion
+
 #region Script Configuration
 $script:Config = @{
     Version = "0.0.2"
     ScriptName = "Spider Stone"
     AllFiles = @()
+    # Component-level collections extracted from manifests (each exported to its own CSV)
+    Components    = @()   # one row per manifest: full assemblyIdentity + display name + counts
+    Dependencies  = @()   # dependentAssembly edges (component -> component)
+    RegistryItems = @()   # registryKey/registryValue the component installs
+    Categories    = @()   # categoryMembership (component -> feature/category)
+    Directories   = @()   # directory entries the component owns/creates
+    Strings       = @()   # localization stringTable (displayName/description/...)
+    Providers     = @()   # ETW providers the component registers
+    Tasks         = @()   # scheduled tasks the component installs
+    Extras        = @()   # deployment/infFile/appxRegistration/serviceData/migration markers
     WcpModuleLoaded = $false
     WcpDllPath = $null
     ProcessedMumFiles = @()
@@ -80,66 +140,200 @@ function Show-Help {
     
     $helpText = @"
 
-$($script:Config.ScriptName) v$($script:Config.Version) - Optional Feature File Finder and Extractor
+$($script:Config.ScriptName) v$($script:Config.Version) - Windows Optional Feature analyzer
+Chain: feature -> packages -> components -> files. Output: CSV + HTML report. Fully local.
+
+================================  ENGLISH  ================================
 
 USAGE:
-    .\spider_stone.ps1 [-FeatureName <string>] [-OutputDirectory <string>] [-VerboseOutput] [-ParsingMum] 
-                       [-NotShowGridView] [-PathToWcp <string>] [-SearchWcpDll] [-Help]
+    .\Spider-Stone.ps1 [-FeatureName <string>] [-OutputDirectory <string>] [-ParsingMum]
+                       [-NotShowGridView] [-OpenReport] [-ComponentFilter <string>]
+                       [-PathToWcp <string>] [-SearchWcpDll] [-VerboseOutput] [-Help]
 
 PARAMETERS:
     -FeatureName <string>
-        The name of the Windows Optional Feature to analyze.
-        If not specified, shows list of installed features.
-        
+        Name of the Windows Optional Feature to analyze.
+        Without it, the installed features are listed.
+
     -OutputDirectory <string>
-        The directory where manifest files will be copied and extracted.
+        Directory for results (manifests, CSV, HTML).
         Default: .\OptionalFeatureFiles
-        
-    -VerboseOutput
-        Enable verbose output for detailed logging.
-        
+
     -ParsingMum
-        Enable parsing of MUM files from Windows servicing packages.
-        This will recursively process related MUM files.
-        
+        Recursively parse MUM files from C:\Windows\servicing\Packages.
+
     -NotShowGridView
-        Do not display results in GridView.
-        
+        Do not open the results in Out-GridView.
+
+    -OpenReport
+        Open the generated HTML report in the default browser when done.
+
+    -ComponentFilter <string>
+        Output only components whose name contains this word (case-insensitive).
+        Filters files, dependencies, registry, CSVs, HTML and GridView.
+
     -PathToWcp <string>
-        Full path to the wcp.dll file to use for extraction.
-        
+        Explicit path to wcp.dll used to decompress manifests.
+
     -SearchWcpDll
-        Search for the latest version of wcp.dll using WCPExtractor module's Find-LatestWCPDll function.
-        
+        Find and show the latest wcp.dll for the system architecture
+        (WCPExtractor\Find-LatestWCPDll), then exit.
+
+    -VerboseOutput
+        Verbose progress logging.
+
     -Help, -?
-        Show this help message.
+        Show this help.
 
 EXAMPLES:
-    # Show installed features
-    .\spider_stone.ps1
-    
-    # Analyze specific feature
-    .\spider_stone.ps1 -FeatureName "Windows-Defender-Default-Definitions"
-    
-    # Analyze with MUM parsing
-    .\spider_stone.ps1 -FeatureName "RSAT" -ParsingMum -VerboseOutput
-    
-    # Custom output directory without GridView
-    .\spider_stone.ps1 -FeatureName "RSAT" -OutputDirectory "C:\Temp\Features" -NotShowGridView
-    
-    # Use specific wcp.dll
-    .\spider_stone.ps1 -FeatureName "RSAT" -PathToWcp "C:\Windows\System32\wcp.dll"
-    
-    # Search for wcp.dll
-    .\spider_stone.ps1 -SearchWcpDll
+    # List installed features
+    .\Spider-Stone.ps1
+
+    # Analyze a specific feature
+    .\Spider-Stone.ps1 -FeatureName "Windows-Defender-Default-Definitions"
+
+    # With recursive MUM parsing and verbose log
+    .\Spider-Stone.ps1 -FeatureName "RSAT" -ParsingMum -VerboseOutput
+
+    # Only components whose name contains "Defender"
+    .\Spider-Stone.ps1 -FeatureName "Containers" -ComponentFilter "Defender"
+
+    # Custom output directory, no GridView
+    .\Spider-Stone.ps1 -FeatureName "RSAT" -OutputDirectory "C:\Temp\RSAT" -NotShowGridView
+
+    # Use a specific wcp.dll
+    .\Spider-Stone.ps1 -FeatureName "RSAT" -PathToWcp "C:\Windows\System32\wcp.dll"
+
+    # Just find the latest wcp.dll
+    .\Spider-Stone.ps1 -SearchWcpDll
+
+OUTPUT (in <OutputDirectory>\<Feature>\):
+    OptionalFeatureFiles_*.csv  component files (hashes, paths, SDDL, hardlinks)
+    Components_*.csv            one row per component (identity + DisplayName)
+    Dependencies_*.csv          component -> component dependencies
+    Registry_*.csv              component registry footprint
+    Categories_*.csv            category/feature membership
+    Directories_*.csv           component directories + SDDL
+    Strings_*.csv               localization (displayName/description)
+    Providers_*.csv             ETW providers
+    Tasks_*.csv                 scheduled tasks
+    Extras_*.csv                deployment/infFile/appx/service/migration markers
+    Report_*.html              summary HTML report (dark/light theme)
+
+HTML REPORT:
+    Generated automatically for any feature analysis - no separate switch needed.
+    Just pass -FeatureName; the file path is printed to the console when done
+    (line "HTML report : ..."). The path is shown as a terminal hyperlink, but
+    note that Windows Terminal only opens http/https links on click - to open the
+    local report automatically, add -OpenReport (launches the default browser).
+    The file is self-contained, opens in a browser with no internet. Example:
+        .\Spider-Stone.ps1 -FeatureName "DiskIo-QoS"
+        # -> <OutputDirectory>\DiskIo-QoS\Report_DiskIo-QoS.html
+    Open it right after the analysis:
+        Invoke-Item .\OptionalFeatureFiles\DiskIo-QoS\Report_DiskIo-QoS.html
 
 NOTES:
-    - Requires PowerShell 7.0 or higher
-    - Requires WCPExtractor.psm1 module in the same directory
-    - Administrator privileges may be required for some operations
+    - Requires PowerShell 7.0 or newer
+    - Requires the WCPExtractor.psm1 module in the same folder
+    - Administrator rights recommended (CBS registry, WinSxS files)
+
+
+================================  РУССКИЙ  ================================
+
+ИСПОЛЬЗОВАНИЕ:
+    .\Spider-Stone.ps1 [-FeatureName <string>] [-OutputDirectory <string>] [-ParsingMum]
+                       [-NotShowGridView] [-OpenReport] [-ComponentFilter <string>]
+                       [-PathToWcp <string>] [-SearchWcpDll] [-VerboseOutput] [-Help]
+
+ПАРАМЕТРЫ:
+    -FeatureName <string>
+        Имя Windows Optional Feature для анализа.
+        Без него выводится список установленных фич.
+
+    -OutputDirectory <string>
+        Каталог для результатов (манифесты, CSV, HTML).
+        По умолчанию: .\OptionalFeatureFiles
+
+    -ParsingMum
+        Рекурсивно разбирать MUM-файлы из C:\Windows\servicing\Packages.
+
+    -NotShowGridView
+        Не открывать результаты в Out-GridView.
+
+    -OpenReport
+        Открыть готовый HTML-отчёт в браузере по умолчанию по завершении.
+
+    -ComponentFilter <string>
+        Выводить только компоненты, чьё наименование содержит это слово (без учёта
+        регистра). Фильтрует файлы, зависимости, реестр, CSV, HTML и GridView.
+
+    -PathToWcp <string>
+        Явный путь к wcp.dll для распаковки манифестов.
+
+    -SearchWcpDll
+        Найти и показать актуальную wcp.dll под разрядность системы
+        (WCPExtractor\Find-LatestWCPDll) и выйти.
+
+    -VerboseOutput
+        Подробное логирование хода работы.
+
+    -Help, -?
+        Показать эту справку.
+
+ПРИМЕРЫ:
+    # Список установленных фич
+    .\Spider-Stone.ps1
+
+    # Анализ конкретной фичи
+    .\Spider-Stone.ps1 -FeatureName "Windows-Defender-Default-Definitions"
+
+    # С рекурсивным разбором MUM и подробным логом
+    .\Spider-Stone.ps1 -FeatureName "RSAT" -ParsingMum -VerboseOutput
+
+    # Только компоненты, чьё наименование содержит "Defender"
+    .\Spider-Stone.ps1 -FeatureName "Containers" -ComponentFilter "Defender"
+
+    # Свой каталог вывода, без GridView
+    .\Spider-Stone.ps1 -FeatureName "RSAT" -OutputDirectory "C:\Temp\RSAT" -NotShowGridView
+
+    # Указать конкретную wcp.dll
+    .\Spider-Stone.ps1 -FeatureName "RSAT" -PathToWcp "C:\Windows\System32\wcp.dll"
+
+    # Просто найти актуальную wcp.dll
+    .\Spider-Stone.ps1 -SearchWcpDll
+
+ВЫХОДНЫЕ ДАННЫЕ (в <OutputDirectory>\<Feature>\):
+    OptionalFeatureFiles_*.csv  файлы компонентов (хэши, пути, SDDL, хардлинки)
+    Components_*.csv            по строке на компонент (identity + DisplayName)
+    Dependencies_*.csv          зависимости компонент -> компонент
+    Registry_*.csv              реестровый след компонента
+    Categories_*.csv            членство в категориях/фичах
+    Directories_*.csv           каталоги компонента + SDDL
+    Strings_*.csv               локализация (displayName/description)
+    Providers_*.csv             ETW-провайдеры
+    Tasks_*.csv                 задачи планировщика
+    Extras_*.csv                deployment/infFile/appx/service/migration-маркеры
+    Report_*.html              сводный HTML-отчёт (тёмная/светлая тема)
+
+HTML-ОТЧЁТ:
+    Формируется автоматически при анализе любой фичи — отдельный ключ не нужен.
+    Достаточно указать -FeatureName; по завершении путь к файлу выводится в консоль
+    (строка "HTML report : ..."). Путь показывается как гиперссылка, но Windows
+    Terminal по клику открывает только http/https — чтобы локальный отчёт открылся
+    автоматически, добавьте -OpenReport (запустит браузер по умолчанию). Файл
+    самодостаточный, открывается в браузере без интернета. Пример:
+        .\Spider-Stone.ps1 -FeatureName "DiskIo-QoS"
+        # -> <OutputDirectory>\DiskIo-QoS\Report_DiskIo-QoS.html
+    Открыть сразу после анализа:
+        Invoke-Item .\OptionalFeatureFiles\DiskIo-QoS\Report_DiskIo-QoS.html
+
+ЗАМЕЧАНИЯ:
+    - Требуется PowerShell 7.0 или новее
+    - Требуется модуль WCPExtractor.psm1 в той же папке
+    - Для чтения реестра CBS и файлов WinSxS рекомендуются права администратора
 
 "@
-    
+
     Write-Host $helpText -ForegroundColor Cyan
 }
 #endregion
@@ -183,21 +377,6 @@ function Test-RegistryPath {
     }
     
     return Test-Path -Path $Path -ErrorAction SilentlyContinue
-}
-
-function Get-RegistryProperties {
-    <#
-    .SYNOPSIS
-        Safely gets registry properties
-    #>
-    param([string]$Path)
-    
-    if (-not (Test-RegistryPath -Path $Path)) {
-        return $null
-    }
-    
-    $properties = Get-ItemProperty -Path $Path -ErrorAction SilentlyContinue
-    return $properties
 }
 
 function Get-SystemArchitecturePrefix {
@@ -386,113 +565,120 @@ function Test-FeatureExists {
 #endregion
 
 #region Package Discovery Functions
-function Get-PackagesWithFeature {
+function Get-CbsPackageDiscovery {
     <#
     .SYNOPSIS
-        Finds packages containing the specified feature in Updates subkey
+        Fast, low-memory discovery of feature packages and their owner packages.
+    .DESCRIPTION
+        Scans the CBS Packages hive with the .NET Microsoft.Win32.RegistryKey API
+        (10-20x faster than the PowerShell registry provider) in two passes over a
+        single subkey-name enumeration:
+          pass 1 - packages whose 'Updates' subkey lists the feature;
+          pass 2 - packages whose 'Owners' subkey references any feature package.
+        Memory stays tiny: only a HashSet of found package names is retained (no
+        full owner index is built), so no memory-tradeoff switch is needed.
+        Returns an object with .FeaturePackages and .OwnerPackages arrays.
     #>
     param([string]$Feature)
-    
-    Write-VerboseMessage "Searching for feature in Packages registry..."
-    
-    $foundPackages = @()
-    $packagesPath = $script:Config.RegistryPaths.Packages
-    
-    if (-not (Test-RegistryPath -Path $packagesPath)) {
-        Write-Error "Packages registry path not found"
-        return $foundPackages
-    }
-    
-    $packages = Get-ChildItem -Path $packagesPath -ErrorAction SilentlyContinue
-    
-    if ($null -eq $packages) {
-        return $foundPackages
-    }
-    
-    foreach ($package in $packages) {
-        $updatesPath = Join-Path $package.PSPath "Updates"
-        
-        if (-not (Test-RegistryPath -Path $updatesPath)) {
-            continue
-        }
-        
-        $properties = Get-RegistryProperties -Path $updatesPath
-        
-        if ($null -eq $properties) {
-            continue
-        }
-        
-        foreach ($prop in $properties.PSObject.Properties) {
-            if ($prop.Name -eq $Feature) {
-                Write-VerboseMessage "Found feature in package: $($package.PSChildName)"
-                $foundPackages += [PSCustomObject]@{
-                    PackageName = $package.PSChildName
-                    Source = "Packages"
-                }
-                break
-            }
-        }
-    }
-    
-    return $foundPackages
-}
 
-function Get-OwnerPackages {
-    <#
-    .SYNOPSIS
-        Finds packages that own the specified package and retrieves additional info
-    #>
-    param([string]$PackageName)
-    
-    Write-VerboseMessage "Searching for owner packages of: $PackageName"
-    
-    $ownerPackages = @()
-    $packagesPath = $script:Config.RegistryPaths.Packages
-    
-    $packages = Get-ChildItem -Path $packagesPath -ErrorAction SilentlyContinue
-    
-    if ($null -eq $packages) {
-        return $ownerPackages
+    $result = [PSCustomObject]@{ FeaturePackages = @(); OwnerPackages = @() }
+
+    Write-VerboseMessage "Searching for feature in Packages registry (.NET RegistryKey API)..."
+
+    $baseKeyPath = "SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\Packages"
+    $baseKey = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($baseKeyPath)
+    if ($null -eq $baseKey) {
+        Write-Error "Packages registry path not found"
+        return $result
     }
-    
-    foreach ($package in $packages) {
-        $ownersPath = Join-Path $package.PSPath "Owners"
-        
-        if (-not (Test-RegistryPath -Path $ownersPath)) {
-            continue
-        }
-        
-        $properties = Get-RegistryProperties -Path $ownersPath
-        
-        if ($null -eq $properties) {
-            continue
-        }
-        
-        foreach ($prop in $properties.PSObject.Properties) {
-            if ($prop.Name -eq $PackageName) {
-                Write-VerboseMessage "Found owner package: $($package.PSChildName)"
-                
-                # Get additional package information
-                $packageInfo = Get-RegistryProperties -Path $package.PSPath
-                
-                $ownerInfo = [PSCustomObject]@{
-                    PackageName = $package.PSChildName
-                    InstallClient = if ($packageInfo.InstallClient) { $packageInfo.InstallClient } else { "N/A" }
-                    InstallName = if ($packageInfo.InstallName) { $packageInfo.InstallName } else { "N/A" }
-                }
-                
-                # Display additional information
-                Write-Host "  Owner Package: $($ownerInfo.PackageName)" -ForegroundColor Yellow
-                Write-Host "  InstallClient: $($ownerInfo.InstallClient)" -ForegroundColor Gray
-                Write-Host "  InstallName: $($ownerInfo.InstallName)" -ForegroundColor Gray
-                
-                $ownerPackages += $ownerInfo
-                break
+
+    try {
+        $names = $baseKey.GetSubKeyNames()
+        $total = $names.Length
+
+        # Case-insensitive set of package names that carry the feature.
+        $featureNames  = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $featurePkgs   = [System.Collections.Generic.List[object]]::new()
+        $ownerPkgs     = [System.Collections.Generic.List[object]]::new()
+
+        # --- Pass 1: feature packages (Updates subkey lists the feature) ---
+        $act1 = "Scanning CBS packages for feature '$Feature'"
+        $idx = 0
+        foreach ($name in $names) {
+            $idx++
+            if ($total -gt 0 -and ($idx % 200 -eq 0 -or $idx -eq $total)) {
+                Write-Progress -Activity $act1 -Status "$idx / $total (found: $($featurePkgs.Count))" `
+                               -PercentComplete (($idx / $total) * 100)
             }
+            $pkgKey = $baseKey.OpenSubKey($name)
+            if ($null -eq $pkgKey) { continue }
+            try {
+                $upd = $pkgKey.OpenSubKey("Updates")
+                if ($null -ne $upd) {
+                    try {
+                        foreach ($vn in $upd.GetValueNames()) {
+                            if ($vn -eq $Feature) {
+                                Write-VerboseMessage "Found feature in package: $name"
+                                [void]$featureNames.Add($name)
+                                $featurePkgs.Add([PSCustomObject]@{ PackageName = $name; Source = "Packages" })
+                                break
+                            }
+                        }
+                    } finally { $upd.Dispose() }
+                }
+            } finally { $pkgKey.Dispose() }
         }
+        if ($total -gt 0) { Write-Progress -Activity $act1 -Completed }
+
+        # --- Pass 2: owner packages (Owners subkey references a feature package) ---
+        # Skipped entirely when nothing was found (common case), saving a full scan.
+        if ($featureNames.Count -gt 0) {
+            $act2 = "Scanning for owner packages"
+            $idx = 0
+            foreach ($name in $names) {
+                $idx++
+                if ($total -gt 0 -and ($idx % 200 -eq 0 -or $idx -eq $total)) {
+                    Write-Progress -Activity $act2 -Status "$idx / $total (owners: $($ownerPkgs.Count))" `
+                                   -PercentComplete (($idx / $total) * 100)
+                }
+                $pkgKey = $baseKey.OpenSubKey($name)
+                if ($null -eq $pkgKey) { continue }
+                try {
+                    $own = $pkgKey.OpenSubKey("Owners")
+                    if ($null -ne $own) {
+                        try {
+                            foreach ($vn in $own.GetValueNames()) {
+                                if ($featureNames.Contains($vn)) {
+                                    $ic = $pkgKey.GetValue("InstallClient"); if ($null -eq $ic) { $ic = "N/A" }
+                                    $inm = $pkgKey.GetValue("InstallName");  if ($null -eq $inm) { $inm = "N/A" }
+                                    $ownerInfo = [PSCustomObject]@{
+                                        PackageName   = $name
+                                        InstallClient = [string]$ic
+                                        InstallName   = [string]$inm
+                                    }
+                                    Write-VerboseMessage "Found owner package: $name (owns $vn)"
+                                    Write-Host "  Owner Package: $($ownerInfo.PackageName)" -ForegroundColor Yellow
+                                    Write-Host "  InstallClient: $($ownerInfo.InstallClient)" -ForegroundColor Gray
+                                    Write-Host "  InstallName: $($ownerInfo.InstallName)" -ForegroundColor Gray
+                                    $ownerPkgs.Add($ownerInfo)
+                                    break
+                                }
+                            }
+                        } finally { $own.Dispose() }
+                    }
+                } finally { $pkgKey.Dispose() }
+            }
+            if ($total -gt 0) { Write-Progress -Activity $act2 -Completed }
+        }
+
+        $result.FeaturePackages = $featurePkgs.ToArray()
+        $result.OwnerPackages   = $ownerPkgs.ToArray()
     }
-    
-    return $ownerPackages
+    finally {
+        $baseKey.Dispose()
+    }
+
+    return $result
 }
 #endregion
 
@@ -647,10 +833,18 @@ function Copy-ManifestFiles {
     }
     
     $copiedFiles = @()
-    
+
+    $total = @($ManifestFiles).Count
+    $idx = 0
     foreach ($file in $ManifestFiles) {
+        $idx++
+        if ($total -gt 0) {
+            Write-Progress -Activity "Copying manifests" `
+                           -Status "$idx of $total : $($file.Name)" `
+                           -PercentComplete (($idx / $total) * 100)
+        }
         $destPath = Join-Path $fullDestination $file.Name
-        
+
         if (Copy-Item -Path $file.FullName -Destination $destPath -Force -PassThru -ErrorAction SilentlyContinue) {
             Write-VerboseMessage "Copied: $($file.Name)"
             $copiedFiles += $destPath
@@ -658,7 +852,8 @@ function Copy-ManifestFiles {
             Write-Warning "Failed to copy $($file.Name)"
         }
     }
-    
+    if ($total -gt 0) { Write-Progress -Activity "Copying manifests" -Completed }
+
     return $copiedFiles
 }
 #endregion
@@ -727,11 +922,19 @@ function Extract-ManifestFiles {
     if (-not (Initialize-WCPExtractor)) {
         return
     }
-    
+
+    $total = @($ManifestFiles).Count
+    $idx = 0
     foreach ($file in $ManifestFiles) {
+        $idx++
+        if ($total -gt 0) {
+            Write-Progress -Activity "Decompressing manifests (WCP)" `
+                           -Status "$idx of $total : $([System.IO.Path]::GetFileName($file))" `
+                           -PercentComplete (($idx / $total) * 100)
+        }
         $fullInputPath = [System.IO.Path]::GetFullPath($file)
         $fullOutputPath = [System.IO.Path]::GetFullPath("$file.extracted")
-        
+
         Write-VerboseMessage "Extracting: $fullInputPath"
         Write-VerboseMessage "Output to: $fullOutputPath"
         
@@ -760,62 +963,206 @@ function Extract-ManifestFiles {
             break
         }
     }
+    if ($total -gt 0) { Write-Progress -Activity "Decompressing manifests (WCP)" -Completed }
 }
 #endregion
 
 #region XML Processing Functions
+function Get-XmlAttr {
+    <#
+    .SYNOPSIS
+        Safely reads an attribute from an XML node (namespace-agnostic; '' if missing/null)
+    #>
+    param($Node, [string]$Name)
+    if ($null -eq $Node) { return '' }
+    return $Node.GetAttribute($Name)
+}
+
 function Parse-ManifestXml {
     <#
     .SYNOPSIS
-        Parses extracted manifest XML files
+        Parses an extracted manifest and extracts the full component footprint.
+    .DESCRIPTION
+        Beyond <file> entries, pulls the data verified present in WinSxS manifests:
+        full assemblyIdentity (incl. publicKeyToken/buildType/versionScope), per-file
+        SHA hash + securityDescriptor + hardlink target, dependencies, registry footprint,
+        category memberships, directories, localization strings, ETW providers, scheduled
+        tasks, and deployment/infFile/appx/service markers. Uses local-name() XPath so it
+        works across the asm.v1/v2/v3, xmldsig, ETW and task-scheduler namespaces.
     #>
     param([string]$XmlFilePath)
-    
+
     $fullPath = [System.IO.Path]::GetFullPath($XmlFilePath)
-    
-    if (-not (Test-Path $fullPath)) {
-        return $null
-    }
-    
-    $xmlContent = Get-Content -Path $fullPath -Encoding UTF8 -ErrorAction SilentlyContinue
-    
-    if ($null -eq $xmlContent) {
+    if (-not (Test-Path $fullPath)) { return $null }
+
+    $xmlContent = Get-Content -Path $fullPath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($xmlContent)) {
         Write-Warning "Failed to read XML file: $fullPath"
         return $null
     }
-    
-    [xml]$xml = $xmlContent
-    $assembly = $xml.assembly
-    
-    if ($null -eq $assembly) {
+
+    try { [xml]$xml = $xmlContent } catch { Write-Warning "Invalid XML: $fullPath"; return $null }
+
+    $asmNode = $xml.SelectSingleNode("/*[local-name()='assembly']")
+    if ($null -eq $asmNode) { return $null }
+    $idNode = $asmNode.SelectSingleNode("*[local-name()='assemblyIdentity']")
+
+    $manifestName = [System.IO.Path]::GetFileName($fullPath)
+    $asmName        = Get-XmlAttr $idNode 'name'
+
+    # Component name filter: skip this manifest entirely (files + every collection)
+    # unless the component name contains the requested word (case-insensitive).
+    if (-not [string]::IsNullOrWhiteSpace($ComponentFilter) -and
+        $asmName.IndexOf($ComponentFilter, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        Write-VerboseMessage "Skipping '$asmName' (does not match -ComponentFilter '$ComponentFilter')"
         return $null
     }
-    
+
+    $asmVersion     = Get-XmlAttr $idNode 'version'
+    $asmArch        = Get-XmlAttr $idNode 'processorArchitecture'
+    $asmLang        = Get-XmlAttr $idNode 'language'
+    $asmPubKey      = Get-XmlAttr $idNode 'publicKeyToken'
+    $asmBuildType   = Get-XmlAttr $idNode 'buildType'
+    $asmVerScope    = Get-XmlAttr $idNode 'versionScope'
+    $asmIdType      = Get-XmlAttr $idNode 'type'
+
+    # Localization: displayName / description for the component summary
+    $dispNode = $xml.SelectSingleNode("//*[local-name()='string'][@id='displayName']")
+    $descNode = $xml.SelectSingleNode("//*[local-name()='string'][@id='description']")
+    $displayName = Get-XmlAttr $dispNode 'value'
+    $description = Get-XmlAttr $descNode 'value'
+
     $manifestInfo = [PSCustomObject]@{
-        Name = $assembly.assemblyIdentity.name
-        Version = $assembly.assemblyIdentity.version
-        Architecture = $assembly.assemblyIdentity.processorArchitecture
-        Language = $assembly.assemblyIdentity.language
-        Files = @()
+        Name = $asmName; Version = $asmVersion; Architecture = $asmArch; Language = $asmLang; Files = @()
     }
-    
-    # Extract file information
-    if ($null -ne $assembly.file) {
-        foreach ($file in $assembly.file) {
-            $fileInfo = [PSCustomObject]@{
-                FileName = $file.name
-                DestinationPath = $file.destinationPath
-                SourceName = $file.sourceName
-                ImportPath = $file.importPath
-                SourcePath = $file.sourcePath
-                ManifestName = [System.IO.Path]::GetFileName($fullPath)
-                AssemblyName = $assembly.assemblyIdentity.name
-            }
-            $manifestInfo.Files += $fileInfo
-            $script:Config.AllFiles += $fileInfo
+
+    # ---- Files (enriched: hash, securityDescriptor, hardlink, full identity) ----
+    $fileNodes = $xml.SelectNodes("//*[local-name()='file']")
+    foreach ($file in $fileNodes) {
+        $algNode = $file.SelectSingleNode(".//*[local-name()='DigestMethod']")
+        $valNode = $file.SelectSingleNode(".//*[local-name()='DigestValue']")
+        $sdNode  = $file.SelectSingleNode("*[local-name()='securityDescriptor']")
+        $links   = $file.SelectNodes("*[local-name()='link']") | ForEach-Object { $_.GetAttribute('destination') }
+        $alg = Get-XmlAttr $algNode 'Algorithm'
+
+        $fileInfo = [PSCustomObject]@{
+            FileName          = Get-XmlAttr $file 'name'
+            DestinationPath   = Get-XmlAttr $file 'destinationPath'
+            SourceName        = Get-XmlAttr $file 'sourceName'
+            ImportPath        = Get-XmlAttr $file 'importPath'
+            SourcePath        = Get-XmlAttr $file 'sourcePath'
+            WriteableType     = Get-XmlAttr $file 'writeableType'
+            HashAlgorithm     = if ($alg) { ($alg -split '#')[-1] } else { '' }
+            HashValue         = if ($valNode) { $valNode.InnerText } else { '' }
+            SecurityDescriptor= Get-XmlAttr $sdNode 'name'
+            LinkTarget        = ($links -join '; ')
+            ManifestName      = $manifestName
+            AssemblyName      = $asmName
+            Component         = $asmName
+            Version           = $asmVersion
+            Architecture      = $asmArch
+            PublicKeyToken    = $asmPubKey
+        }
+        $manifestInfo.Files += $fileInfo
+        $script:Config.AllFiles += $fileInfo
+    }
+
+    # ---- Component summary row ----
+    $script:Config.Components += [PSCustomObject]@{
+        Component = $asmName; Version = $asmVersion; Architecture = $asmArch; Language = $asmLang
+        PublicKeyToken = $asmPubKey; BuildType = $asmBuildType; VersionScope = $asmVerScope; IdentityType = $asmIdType
+        DisplayName = $displayName; Description = $description
+        FileCount = $fileNodes.Count
+        ManifestName = $manifestName
+    }
+
+    # ---- Dependencies (component -> component) ----
+    foreach ($dep in $xml.SelectNodes("//*[local-name()='dependentAssembly']")) {
+        $di = $dep.SelectSingleNode("*[local-name()='assemblyIdentity']")
+        if ($null -eq $di) { continue }
+        $script:Config.Dependencies += [PSCustomObject]@{
+            Component = $asmName
+            DependencyType = Get-XmlAttr $dep 'dependencyType'
+            DependsOnName = Get-XmlAttr $di 'name'
+            DependsOnVersion = Get-XmlAttr $di 'version'
+            DependsOnArch = Get-XmlAttr $di 'processorArchitecture'
+            DependsOnLanguage = Get-XmlAttr $di 'language'
+            DependsOnPublicKeyToken = Get-XmlAttr $di 'publicKeyToken'
+            DependsOnVersionScope = Get-XmlAttr $di 'versionScope'
+            ManifestName = $manifestName
         }
     }
-    
+
+    # ---- Registry footprint ----
+    foreach ($key in $xml.SelectNodes("//*[local-name()='registryKey']")) {
+        $keyName = Get-XmlAttr $key 'keyName'
+        $keySd   = Get-XmlAttr ($key.SelectSingleNode("*[local-name()='securityDescriptor']")) 'name'
+        $values  = $key.SelectNodes("*[local-name()='registryValue']")
+        if ($values.Count -eq 0) {
+            $script:Config.RegistryItems += [PSCustomObject]@{
+                Component=$asmName; KeyName=$keyName; ValueName=''; ValueType=''; Value=''; SecurityDescriptor=$keySd; ManifestName=$manifestName }
+        } else {
+            foreach ($v in $values) {
+                $script:Config.RegistryItems += [PSCustomObject]@{
+                    Component=$asmName; KeyName=$keyName
+                    ValueName = Get-XmlAttr $v 'name'; ValueType = Get-XmlAttr $v 'valueType'; Value = Get-XmlAttr $v 'value'
+                    SecurityDescriptor=$keySd; ManifestName=$manifestName }
+            }
+        }
+    }
+
+    # ---- Category memberships (component -> feature/category) ----
+    foreach ($id in $xml.SelectNodes("//*[local-name()='categoryMembership']/*[local-name()='id']")) {
+        $script:Config.Categories += [PSCustomObject]@{
+            Component=$asmName
+            CategoryName = Get-XmlAttr $id 'name'; CategoryVersion = Get-XmlAttr $id 'version'
+            CategoryPublicKeyToken = Get-XmlAttr $id 'publicKeyToken'; TypeName = Get-XmlAttr $id 'typeName'
+            ManifestName=$manifestName }
+    }
+
+    # ---- Directories ----
+    foreach ($d in $xml.SelectNodes("//*[local-name()='directory']")) {
+        $script:Config.Directories += [PSCustomObject]@{
+            Component=$asmName; DestinationPath = Get-XmlAttr $d 'destinationPath'; Owner = Get-XmlAttr $d 'owner'
+            SecurityDescriptor = Get-XmlAttr ($d.SelectSingleNode("*[local-name()='securityDescriptor']")) 'name'
+            ManifestName=$manifestName }
+    }
+
+    # ---- Localization strings ----
+    foreach ($s in $xml.SelectNodes("//*[local-name()='string']")) {
+        $script:Config.Strings += [PSCustomObject]@{
+            Component=$asmName; StringId = Get-XmlAttr $s 'id'; Value = Get-XmlAttr $s 'value'; ManifestName=$manifestName }
+    }
+
+    # ---- ETW providers ----
+    foreach ($p in $xml.SelectNodes("//*[local-name()='provider']")) {
+        $script:Config.Providers += [PSCustomObject]@{
+            Component=$asmName; ProviderName = Get-XmlAttr $p 'name'; Guid = Get-XmlAttr $p 'guid'
+            MessageFileName = Get-XmlAttr $p 'messageFileName'; ResourceFileName = Get-XmlAttr $p 'resourceFileName'
+            ManifestName=$manifestName }
+    }
+
+    # ---- Scheduled tasks ----
+    foreach ($t in $xml.SelectNodes("//*[local-name()='Task']")) {
+        $uri = $t.SelectSingleNode(".//*[local-name()='URI']")
+        $src = $t.SelectSingleNode(".//*[local-name()='Source']")
+        $aut = $t.SelectSingleNode(".//*[local-name()='Author']")
+        $script:Config.Tasks += [PSCustomObject]@{
+            Component=$asmName
+            Uri = if($uri){$uri.InnerText}else{''}; Source = if($src){$src.InnerText}else{''}; Author = if($aut){$aut.InnerText}else{''}
+            ManifestName=$manifestName }
+    }
+
+    # ---- Extra markers: deployment / infFile / appxRegistration / serviceData / migration / protocolDriver ----
+    foreach ($kind in 'deployment','infFile','deconstructionTool','appxRegistration','serviceData','migration','protocolDriver','networkComponents','counterSet') {
+        foreach ($n in $xml.SelectNodes("//*[local-name()='$kind']")) {
+            $script:Config.Extras += [PSCustomObject]@{
+                Component=$asmName; Kind=$kind
+                Name = (Get-XmlAttr $n 'name'); Detail = $n.OuterXml.Substring(0, [Math]::Min(200, $n.OuterXml.Length))
+                ManifestName=$manifestName }
+        }
+    }
+
     return $manifestInfo
 }
 
@@ -859,6 +1206,225 @@ function Show-FileInformation {
     } else {
         Write-Warning "Failed to save CSV file"
     }
+}
+
+function Export-ComponentData {
+    <#
+    .SYNOPSIS
+        Exports every component-level collection to its own CSV in the output directory.
+    #>
+    param(
+        [string]$Feature,
+        [string]$OutputPath
+    )
+
+    $safeFeatureName = if ([string]::IsNullOrWhiteSpace($Feature)) { "AllFeatures" } else { $Feature -replace '[^\w\-]', '_' }
+
+    $sets = [ordered]@{
+        Components   = $script:Config.Components
+        Dependencies = $script:Config.Dependencies
+        Registry     = $script:Config.RegistryItems
+        Categories   = $script:Config.Categories
+        Directories  = $script:Config.Directories
+        Strings      = $script:Config.Strings
+        Providers    = $script:Config.Providers
+        Tasks        = $script:Config.Tasks
+        Extras       = $script:Config.Extras
+    }
+
+    Write-Header -Title "Component footprint" -Color Yellow
+    foreach ($kv in $sets.GetEnumerator()) {
+        $rows = $kv.Value
+        if ($null -eq $rows -or $rows.Count -eq 0) {
+            Write-Host ("  {0,-13}: 0" -f $kv.Key) -ForegroundColor DarkGray
+            continue
+        }
+        $csvPath = Join-Path $OutputPath ("{0}_{1}.csv" -f $kv.Key, $safeFeatureName)
+        $rows | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8 -ErrorAction SilentlyContinue
+        Write-Host ("  {0,-13}: {1,5}  -> {2}" -f $kv.Key, $rows.Count, [System.IO.Path]::GetFileName($csvPath)) -ForegroundColor Green
+    }
+}
+
+function ConvertTo-HtmlSafe {
+    <# HTML-encodes a value (built-in, no System.Web dependency). #>
+    param($Value)
+    if ($null -eq $Value) { return '' }
+    return [System.Net.WebUtility]::HtmlEncode([string]$Value)
+}
+
+function New-HtmlSection {
+    <#
+    .SYNOPSIS
+        Renders one collection as a collapsible <details> section with a table.
+    #>
+    param(
+        [string]$Title,
+        [string]$Icon,
+        [array]$Rows,
+        [string[]]$Columns,
+        [int]$MaxRows = 500
+    )
+
+    $count = if ($Rows) { $Rows.Count } else { 0 }
+    $sb = [System.Text.StringBuilder]::new()
+    [void]$sb.Append("<details><summary><span class='sname'>$(ConvertTo-HtmlSafe $Title)</span><span class='badge'>$count</span></summary>")
+
+    if ($count -eq 0) {
+        [void]$sb.Append("<p class='empty'>No entries.</p></details>")
+        return $sb.ToString()
+    }
+
+    [void]$sb.Append("<div class='tablewrap'><table><thead><tr>")
+    foreach ($c in $Columns) { [void]$sb.Append("<th>$(ConvertTo-HtmlSafe $c)</th>") }
+    [void]$sb.Append("</tr></thead><tbody>")
+
+    foreach ($r in ($Rows | Select-Object -First $MaxRows)) {
+        [void]$sb.Append("<tr>")
+        foreach ($c in $Columns) {
+            $cls = if ($c -match 'Hash|Guid|Token|Value$|Uri') { " class='mono'" } else { "" }
+            [void]$sb.Append("<td$cls>$(ConvertTo-HtmlSafe $r.$c)</td>")
+        }
+        [void]$sb.Append("</tr>")
+    }
+    [void]$sb.Append("</tbody></table></div>")
+    if ($count -gt $MaxRows) {
+        [void]$sb.Append("<p class='note'>Showing first $MaxRows of $count rows &mdash; full data in the matching CSV.</p>")
+    }
+    [void]$sb.Append("</details>")
+    return $sb.ToString()
+}
+
+function Export-HtmlReport {
+    <#
+    .SYNOPSIS
+        Writes a self-contained, theme-aware HTML report of the component footprint.
+    #>
+    param(
+        [string]$Feature,
+        [string]$OutputPath
+    )
+
+    $safeFeatureName = if ([string]::IsNullOrWhiteSpace($Feature)) { "AllFeatures" } else { $Feature -replace '[^\w\-]', '_' }
+    $reportPath = Join-Path $OutputPath ("Report_{0}.html" -f $safeFeatureName)
+    $now = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+    $cfg = $script:Config
+    $cards = @(
+        @{ n = 'Components';   v = $cfg.Components.Count }
+        @{ n = 'Files';        v = $cfg.AllFiles.Count }
+        @{ n = 'Dependencies'; v = $cfg.Dependencies.Count }
+        @{ n = 'Registry';     v = $cfg.RegistryItems.Count }
+        @{ n = 'Categories';   v = $cfg.Categories.Count }
+        @{ n = 'Directories';  v = $cfg.Directories.Count }
+        @{ n = 'Providers';    v = $cfg.Providers.Count }
+        @{ n = 'Tasks';        v = $cfg.Tasks.Count }
+    )
+    $cardHtml = ($cards | ForEach-Object {
+        "<div class='card'><div class='num'>$($_.v)</div><div class='lbl'>$(ConvertTo-HtmlSafe $_.n)</div></div>"
+    }) -join ''
+
+    $sections = [System.Text.StringBuilder]::new()
+    [void]$sections.Append((New-HtmlSection -Title 'Components' -Icon '&#129513;' -Rows $cfg.Components -Columns 'Component','DisplayName','Version','Architecture','Language','PublicKeyToken','BuildType','VersionScope','FileCount'))
+    [void]$sections.Append((New-HtmlSection -Title 'Files' -Icon '&#128196;' -Rows $cfg.AllFiles -Columns 'Component','FileName','DestinationPath','HashAlgorithm','HashValue','SecurityDescriptor','LinkTarget'))
+    [void]$sections.Append((New-HtmlSection -Title 'Dependencies' -Icon '&#128279;' -Rows $cfg.Dependencies -Columns 'Component','DependencyType','DependsOnName','DependsOnVersion','DependsOnArch','DependsOnPublicKeyToken'))
+    [void]$sections.Append((New-HtmlSection -Title 'Registry' -Icon '&#128273;' -Rows $cfg.RegistryItems -Columns 'Component','KeyName','ValueName','ValueType','Value','SecurityDescriptor'))
+    [void]$sections.Append((New-HtmlSection -Title 'Categories' -Icon '&#127991;' -Rows $cfg.Categories -Columns 'Component','CategoryName','CategoryVersion','TypeName'))
+    [void]$sections.Append((New-HtmlSection -Title 'Directories' -Icon '&#128193;' -Rows $cfg.Directories -Columns 'Component','DestinationPath','Owner','SecurityDescriptor'))
+    [void]$sections.Append((New-HtmlSection -Title 'Localization strings' -Icon '&#127760;' -Rows $cfg.Strings -Columns 'Component','StringId','Value'))
+    [void]$sections.Append((New-HtmlSection -Title 'ETW providers' -Icon '&#128225;' -Rows $cfg.Providers -Columns 'Component','ProviderName','Guid','MessageFileName','ResourceFileName'))
+    [void]$sections.Append((New-HtmlSection -Title 'Scheduled tasks' -Icon '&#9200;' -Rows $cfg.Tasks -Columns 'Component','Uri','Source','Author'))
+    [void]$sections.Append((New-HtmlSection -Title 'Deployment / AppX / services' -Icon '&#128230;' -Rows $cfg.Extras -Columns 'Component','Kind','Name'))
+
+    $css = @'
+:root{--bg:#eceef1;--panel:#ffffff;--ink:#161b21;--muted:#5a6572;--line:#dce0e5;--accent:#a5620a;--accentbg:#f6efe1;--mono:#0f766e;--chip:#e6eaef;--shadow:0 1px 2px rgba(20,28,38,.05)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0d1116;--panel:#151b23;--ink:#e6edf4;--muted:#93a0ad;--line:#242d38;--accent:#e0a54a;--accentbg:#251d10;--mono:#48c4b6;--chip:#1d2530;--shadow:0 1px 2px rgba(0,0,0,.3)}}
+:root[data-theme=dark]{--bg:#0d1116;--panel:#151b23;--ink:#e6edf4;--muted:#93a0ad;--line:#242d38;--accent:#e0a54a;--accentbg:#251d10;--mono:#48c4b6;--chip:#1d2530;--shadow:0 1px 2px rgba(0,0,0,.3)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 "Segoe UI Variable Text","Segoe UI",system-ui,Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:34px 22px 64px}
+.eyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:11px;font-weight:600;color:var(--accent)}
+header h1{margin:6px 0 6px;font-size:30px;font-weight:700;letter-spacing:-.01em;text-wrap:balance}
+header .sub{color:var(--muted);font-size:13px}
+header .sub strong{color:var(--ink);font-weight:600}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(124px,1fr));gap:10px;margin:26px 0 30px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 14px;box-shadow:var(--shadow)}
+.card .num{font-size:25px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1.1}
+.card .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-top:5px}
+details{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin:10px 0;overflow:hidden;box-shadow:var(--shadow)}
+summary{cursor:pointer;padding:13px 16px 13px 30px;list-style:none;display:flex;align-items:center;gap:10px;position:relative}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"";position:absolute;left:14px;top:50%;width:6px;height:6px;margin-top:-3px;border-right:2px solid var(--accent);border-bottom:2px solid var(--accent);transform:rotate(-45deg);transition:transform .15s ease}
+details[open]>summary::before{transform:rotate(45deg)}
+@media(prefers-reduced-motion:reduce){summary::before{transition:none}}
+.sname{font-weight:600;font-size:15px}
+summary:hover{background:var(--accentbg)}
+summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.badge{margin-left:auto;background:var(--chip);color:var(--muted);border-radius:20px;padding:2px 11px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.tablewrap{overflow-x:auto;border-top:1px solid var(--line)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:8px 14px;border-bottom:1px solid var(--line);white-space:nowrap;max-width:520px;overflow:hidden;text-overflow:ellipsis}
+thead th{position:sticky;top:0;background:var(--panel);color:var(--muted);font-weight:600;text-transform:uppercase;font-size:10.5px;letter-spacing:.06em}
+tbody tr:hover{background:var(--accentbg)}
+td.mono{font-family:"Cascadia Code","Cascadia Mono",Consolas,ui-monospace,"Liberation Mono",monospace;color:var(--mono);font-size:12px}
+.empty{padding:14px 16px 16px 30px;color:var(--muted);margin:0;font-size:13px}
+.note{padding:9px 16px;color:var(--muted);font-size:12px;margin:0;border-top:1px solid var(--line);background:var(--accentbg)}
+footer{margin-top:32px;color:var(--muted);font-size:12px;text-align:center}
+footer strong{color:var(--accent);font-weight:600}
+'@
+
+    $html = @"
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spider Stone - $(ConvertTo-HtmlSafe $Feature)</title><style>$css</style></head>
+<body><div class="wrap">
+<header>
+<div class="eyebrow">Component-Based Servicing &middot; WinSxS footprint</div>
+<h1>Spider&nbsp;Stone</h1>
+<div class="sub">Feature <strong>$(ConvertTo-HtmlSafe $Feature)</strong> &nbsp;&middot;&nbsp; $($cfg.Components.Count) component(s), $($cfg.AllFiles.Count) file(s) &nbsp;&middot;&nbsp; generated $now</div></header>
+<div class="cards">$cardHtml</div>
+$($sections.ToString())
+<footer>Spider Stone v$($script:Config.Version) &bull; data also exported as CSV alongside this report</footer>
+</div></body></html>
+"@
+
+    [System.IO.File]::WriteAllText($reportPath, $html, [System.Text.Encoding]::UTF8)
+    if (Test-Path $reportPath) {
+        $fullReport = [System.IO.Path]::GetFullPath($reportPath)
+        # When writing to an interactive console, emit an OSC 8 terminal hyperlink so
+        # the path is Ctrl+Click-able (Windows Terminal, VS Code, and the Windows 11 /
+        # Server 2025 conhost all support OSC 8). The visible link text is the full
+        # path, so even a terminal that ignores OSC 8 still shows a usable path. When
+        # output is redirected to a file/pipe, print a plain path with no escapes.
+        if (-not [Console]::IsOutputRedirected) {
+            $uri = ([System.Uri]$fullReport).AbsoluteUri
+            $e = [char]27
+            $link = "$e]8;;$uri$e\$fullReport$e]8;;$e\"
+            Write-Host "`n  HTML report : " -ForegroundColor Cyan -NoNewline
+            Write-Host $link -ForegroundColor Cyan -NoNewline
+            # Windows Terminal highlights file:// links but, for security, only opens
+            # http/https on click - so point users at -OpenReport for reliable opening.
+            if (-not $OpenReport) {
+                Write-Host "  (re-run with the -OpenReport script parameter to open it in the browser)" -ForegroundColor DarkGray
+            } else {
+                Write-Host ""
+            }
+        } else {
+            Write-Host "`n  HTML report : $fullReport" -ForegroundColor Cyan
+        }
+
+        # Open the report in the default browser when requested.
+        if ($OpenReport) {
+            try {
+                Start-Process $fullReport -ErrorAction Stop
+                Write-Host "  Opening report in the default browser..." -ForegroundColor Green
+            } catch {
+                Write-Warning "Could not open the report automatically: $($_.Exception.Message)"
+            }
+        }
+    } else {
+        Write-Warning "Failed to write HTML report"
+    }
+    return $reportPath
 }
 #endregion
 
@@ -941,54 +1507,54 @@ function Main {
     $featureOutputDir = Get-FeatureOutputDirectory -Feature $FeatureName
     Write-Host "`nOutput directory: $featureOutputDir" -ForegroundColor Green
     
-    # Find packages with the feature
+    # Find packages with the feature (single fast .NET scan: feature + owner packages)
     Write-Header -Title "Searching for packages" -Color Yellow
-    $packages = Get-PackagesWithFeature -Feature $FeatureName
-    
+    $discovery = Get-CbsPackageDiscovery -Feature $FeatureName
+    $packages = $discovery.FeaturePackages
+
     if ($packages.Count -eq 0) {
         Write-Warning "No packages found containing feature '$FeatureName'"
         return
     }
-    
+
     Write-Host "Found $($packages.Count) package(s) with the feature" -ForegroundColor Green
     foreach ($pkg in $packages) {
         Write-Host "  - $($pkg.PackageName) [$($pkg.Source)]" -ForegroundColor Gray
     }
-    
+
     # Collect MUM files for processing if enabled
     $mumFilesToProcess = @()
-    
+
     # Find manifest files
     $allManifests = @()
-    
+
+    # Feature packages -> manifests
     foreach ($package in $packages) {
         Write-VerboseMessage "Processing package: $($package.PackageName)"
-        
-        # Generate manifest name and find files
+
         $manifestPrefix = Get-ManifestFileName -PackageName $package.PackageName
         $manifests = Find-ManifestFiles -ManifestPrefix $manifestPrefix
-        
+
         if ($manifests.Count -gt 0) {
             $allManifests += $manifests
         }
-        
-        # Check for owner packages
-        $ownerPackages = Get-OwnerPackages -PackageName $package.PackageName
-        
-        foreach ($ownerPackage in $ownerPackages) {
-            Write-VerboseMessage "Processing owner package: $($ownerPackage.PackageName)"
-            
-            # Collect MUM file names if ParsingMum is enabled
-            if ($ParsingMum -and -not [string]::IsNullOrWhiteSpace($ownerPackage.InstallName)) {
-                $mumFilesToProcess += $ownerPackage.InstallName
-            }
-            
-            $ownerManifestPrefix = Get-ManifestFileName -PackageName $ownerPackage.PackageName
-            $ownerManifests = Find-ManifestFiles -ManifestPrefix $ownerManifestPrefix
-            
-            if ($ownerManifests.Count -gt 0) {
-                $allManifests += $ownerManifests
-            }
+    }
+
+    # Owner packages (discovered once in the same scan) -> manifests + MUM install names
+    foreach ($ownerPackage in $discovery.OwnerPackages) {
+        Write-VerboseMessage "Processing owner package: $($ownerPackage.PackageName)"
+
+        # Collect MUM file names if ParsingMum is enabled
+        if ($ParsingMum -and -not [string]::IsNullOrWhiteSpace($ownerPackage.InstallName) `
+            -and $ownerPackage.InstallName -ne "N/A") {
+            $mumFilesToProcess += $ownerPackage.InstallName
+        }
+
+        $ownerManifestPrefix = Get-ManifestFileName -PackageName $ownerPackage.PackageName
+        $ownerManifests = Find-ManifestFiles -ManifestPrefix $ownerManifestPrefix
+
+        if ($ownerManifests.Count -gt 0) {
+            $allManifests += $ownerManifests
         }
     }
     
@@ -1032,16 +1598,34 @@ function Main {
     
     # Parse extracted XML files
     Write-Header -Title "Parsing manifest files" -Color Yellow
-    
+
+    $parseTotal = @($copiedFiles).Count
+    $parseIdx = 0
     foreach ($copiedFile in $copiedFiles) {
+        $parseIdx++
+        if ($parseTotal -gt 0) {
+            Write-Progress -Activity "Parsing manifests" `
+                           -Status "$parseIdx of $parseTotal : $([System.IO.Path]::GetFileName($copiedFile))" `
+                           -PercentComplete (($parseIdx / $parseTotal) * 100)
+        }
         $extractedFile = "$copiedFile.extracted"
-        
+
         if (Test-Path $extractedFile) {
             Write-VerboseMessage "Parsing: $extractedFile"
             Parse-ManifestXml -XmlFilePath $extractedFile | Out-Null
         }
     }
-    
+    if ($parseTotal -gt 0) { Write-Progress -Activity "Parsing manifests" -Completed }
+
+    # Report on the component name filter, if one was supplied
+    if (-not [string]::IsNullOrWhiteSpace($ComponentFilter)) {
+        $matched = $script:Config.Components.Count
+        Write-Host ("`nComponent filter '{0}': {1} component(s) matched" -f $ComponentFilter, $matched) -ForegroundColor Cyan
+        if ($matched -eq 0) {
+            Write-Warning "No components contain '$ComponentFilter' - nothing to export. Run without -ComponentFilter to see all components."
+        }
+    }
+
     # Display results
     if ($script:Config.AllFiles.Count -gt 0) {
         Write-Host "`nFound $($script:Config.AllFiles.Count) file(s) in manifests" -ForegroundColor Green
@@ -1049,7 +1633,11 @@ function Main {
     } else {
         Write-Warning "No file information found in manifests"
     }
-    
+
+    # Export the full component footprint (one CSV per data kind) + a readable HTML report
+    Export-ComponentData -Feature $FeatureName -OutputPath $featureOutputDir
+    Export-HtmlReport -Feature $FeatureName -OutputPath $featureOutputDir | Out-Null
+
     Write-Host "`nScript completed!" -ForegroundColor Green
 }
 

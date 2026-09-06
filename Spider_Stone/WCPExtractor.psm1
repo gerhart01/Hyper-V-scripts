@@ -63,6 +63,14 @@ namespace WCP {
         ushort lpName,
         IntPtr pOutDict
     );
+
+    // Optional (build-dependent) export. Confirmed present in wcp.dll 10.0.26100.33288 as
+    // ?IsManifestCompressed@Rtl@Implementation@WCP@Windows@@YAJPEBU_LBLOB@@PEA_N@Z
+    //   long IsManifestCompressed(const _LBLOB* in, bool* isCompressed)
+    public delegate int IsManifestCompressedDelegate(
+        ref BlobData inData,
+        [MarshalAs(UnmanagedType.U1)] ref bool isCompressed
+    );
 }
 '@
 
@@ -311,8 +319,150 @@ function Initialize-WCPModule {
         }
     }
     
+    # Optional exports: resolve if present, do not fail the module when a given
+    # wcp.dll build does not export them. Name verified against 10.0.26100.33288.
+    $optionalProcAddresses = @{
+        IsManifestCompressed = "?IsManifestCompressed@Rtl@Implementation@WCP@Windows@@YAJPEBU_LBLOB@@PEA_N@Z"
+    }
+
+    foreach ($func in $optionalProcAddresses.GetEnumerator()) {
+        $ptr = [WCP.NativeMethods]::GetProcAddress($wcpModule, $func.Value)
+        if ($ptr -eq [IntPtr]::Zero) {
+            Write-Verbose "Optional export not found in this wcp.dll build: $($func.Key)"
+            continue
+        }
+        Write-Verbose "Got optional procedure address for $($func.Key): 0x$($ptr.ToString('X'))"
+        switch ($func.Key) {
+            "IsManifestCompressed" {
+                $functions[$func.Key] = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer(
+                    $ptr, [WCP.IsManifestCompressedDelegate])
+            }
+        }
+    }
+
     Write-Verbose "WCP module initialization complete"
     return $functions
+}
+
+function Test-WCPManifestCompressed {
+    <#
+    .SYNOPSIS
+    Reports whether a manifest blob is WCP-compressed, using wcp.dll's own IsManifestCompressed.
+
+    .DESCRIPTION
+    Some WinSxS manifests are stored uncompressed (plain UTF-8/UTF-16 XML). Feeding those to the
+    delta-decompress path fails. This wraps the native ?IsManifestCompressed@Rtl@Implementation@WCP@Windows@@
+    export so callers can decide whether to decompress or read the file as-is. Returns $null when the
+    loaded wcp.dll build does not export the function (older servicing stacks).
+
+    .PARAMETER InputFile
+    Path to the manifest file to test.
+
+    .PARAMETER WCPDllPath
+    Path to wcp.dll. If omitted, the latest matching-bitness version is located automatically.
+
+    .OUTPUTS
+    [bool] $true / $false, or $null if the export is unavailable.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [ValidateScript({ Test-Path $_ -PathType Leaf })]
+        [string]$InputFile,
+
+        [Parameter(Mandatory = $false)]
+        [string]$WCPDllPath
+    )
+
+    $InputFile = [System.IO.Path]::GetFullPath($InputFile)
+    $wcp = $null
+    $inputDataPtr = [IntPtr]::Zero
+
+    try {
+        if ([string]::IsNullOrEmpty($WCPDllPath)) { $WCPDllPath = Find-LatestWCPDll }
+        $wcp = Initialize-WCPModule -WCPPath $WCPDllPath
+
+        if (-not $wcp.ContainsKey("IsManifestCompressed")) {
+            Write-Verbose "IsManifestCompressed not exported by this wcp.dll build"
+            return $null
+        }
+
+        $fileBytes = [System.IO.File]::ReadAllBytes($InputFile)
+        if ($fileBytes.Length -eq 0) { throw "Input file is empty" }
+
+        $inputDataPtr = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($fileBytes.Length)
+        [System.Runtime.InteropServices.Marshal]::Copy($fileBytes, 0, $inputDataPtr, $fileBytes.Length)
+
+        $inData = New-Object WCP.BlobData
+        $inData.length = [IntPtr]$fileBytes.Length
+        $inData.fill   = [IntPtr]$fileBytes.Length
+        $inData.pData  = $inputDataPtr
+
+        $isCompressed = $false
+        $hr = $wcp.IsManifestCompressed.Invoke([ref]$inData, [ref]$isCompressed)
+        if ($hr -lt 0) { throw "IsManifestCompressed failed: 0x$($hr.ToString('X8'))" }
+
+        return [bool]$isCompressed
+    } catch {
+        Write-Error "Test-WCPManifestCompressed failed: $_"
+        return $null
+    } finally {
+        if ($inputDataPtr -ne [IntPtr]::Zero) {
+            [System.Runtime.InteropServices.Marshal]::FreeHGlobal($inputDataPtr)
+        }
+        if ($wcp -and $wcp.Module -ne [IntPtr]::Zero) {
+            [WCP.NativeMethods]::FreeLibrary($wcp.Module) | Out-Null
+        }
+    }
+}
+
+function Get-WCPCompressionTypeName {
+    <#
+    .SYNOPSIS
+    Maps a wcp.dll GetCompressedFileType numeric result to a human-readable name.
+
+    .DESCRIPTION
+    The numeric code returned by the live wcp.dll is authoritative. These labels are the
+    decoded enum snapshot from ServicingCommon.dll (Windows Server 2025, build 26100.x):
+    the compressed-file header is 'D' 'C' <T> 0x01 with <T> selecting the type -
+    D=1, N=2, H=3, M=4 (DCM delta manifest), S=5 (DCS/LZMS), X=6. If Microsoft changes the
+    enum in a newer wcp.dll, an unmapped code is labelled from the on-disk magic byte instead,
+    so detection never depends on a frozen table.
+
+    .PARAMETER Code
+    The value returned by GetCompressedFileType.
+
+    .PARAMETER Bytes
+    Optional first bytes of the file, used to label codes not in the known map.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [uint32]$Code,
+
+        [Parameter(Mandatory = $false)]
+        [byte[]]$Bytes
+    )
+
+    $map = @{
+        0 = 'uncompressed/none'
+        1 = 'DCD'
+        2 = 'DCN'
+        3 = 'DCH'
+        4 = 'DCM (delta manifest)'
+        5 = 'DCS (LZMS)'
+        6 = 'DCX'
+    }
+
+    if ($map.ContainsKey([int]$Code)) {
+        return $map[[int]$Code]
+    }
+
+    if ($Bytes -and $Bytes.Length -ge 4 -and $Bytes[0] -eq 0x44 -and $Bytes[1] -eq 0x43 -and $Bytes[3] -eq 0x01) {
+        return ("DC{0}\x01 (code {1}, unmapped)" -f [char]$Bytes[2], $Code)
+    }
+
+    return "unknown (code $Code)"
 }
 
 function Expand-WCPFile {
@@ -409,15 +559,42 @@ function Expand-WCPFile {
         $inData.fill = [IntPtr]$fileSize
         $inData.pData = $inputDataPtr
         
-        # Get compressed file type
+        # --- Version-resilient compression-type detection & dispatch ---
+        # The numeric type is taken from the LIVE wcp.dll (authoritative across versions).
+        # Names + magic layout are the decoded enum from ServicingCommon.dll (Server 2025
+        # 26100.x, onecore\base\wcp\rtllib\win32lib\delta_library.cpp):
+        #   header = 'D' 'C' <T> 0x01 (len >= 4);  <T>: D=1 N=2 H=3 M=4 S=5 X=6
+        #   Only type 4 (DCM) counts as "compressed" per IsManifestCompressed; type 5 (DCS) is LZMS.
         Write-Verbose "Getting compressed file type..."
         $fileType = $wcp.GetCompressedFileType.Invoke([ref]$inData)
-        Write-Host "Compressed file type: $fileType" -ForegroundColor Gray
-        
-        if ($fileType -ne 4) {
-            Write-Warning "WARNING: Untested compression type '$fileType'"
+        $typeName = Get-WCPCompressionTypeName -Code $fileType -Bytes $fileBytes
+        Write-Host "Compressed file type: $fileType ($typeName)" -ForegroundColor Gray
+
+        # No DC?\x01 magic => not WCP-compressed; the bytes are already the plain manifest.
+        $hasWcpMagic = ($fileSize -ge 4 -and $fileBytes[0] -eq 0x44 -and $fileBytes[1] -eq 0x43 -and $fileBytes[3] -eq 0x01)
+        if (-not $hasWcpMagic) {
+            Write-Host "Input is not WCP-compressed - passing through unchanged." -ForegroundColor Gray
+            $passText = [System.Text.Encoding]::UTF8.GetString($fileBytes)
+            if ($OutputFile) {
+                $OutputFile = [System.IO.Path]::GetFullPath($OutputFile)
+                $passDir = Split-Path -Parent $OutputFile
+                if ($passDir -and -not (Test-Path $passDir)) { New-Item -ItemType Directory -Path $passDir -Force | Out-Null }
+                [System.IO.File]::WriteAllText($OutputFile, $passText, [System.Text.Encoding]::UTF8)
+                Write-Host "`nWrote pass-through output to: $OutputFile" -ForegroundColor Green
+            } else {
+                Write-Output $passText
+            }
+            return
         }
-        
+
+        # Compressed, but not the delta manifest type: do not guess. Type 5 (DCS/LZMS) needs the
+        # ?LZMSDecompressBuffer@Rtl@WCP@Windows@@ branch wired against a validated Auto<_LBLOB>
+        # layout - deliberately a typed extension point, not a blind native call.
+        if ($fileType -ne 4) {
+            throw ("WCP compression type $fileType ($typeName) is not supported by the delta path. " +
+                   "Type 5 (DCS/LZMS) requires an LZMSDecompressBuffer branch; types 1/2/3/6 are not implemented.")
+        }
+
         # Initialize delta compressor
         Write-Verbose "Initializing delta compressor..."
         $result = $wcp.InitializeDeltaCompressor.Invoke([IntPtr]::Zero)
@@ -616,4 +793,4 @@ function Test-WCPManifest {
 }
 
 # Export module functions
-Export-ModuleMember -Function Expand-WCPFile, Find-LatestWCPDll, Test-WCPManifest, Get-ProcessorArchitecture
+Export-ModuleMember -Function Expand-WCPFile, Find-LatestWCPDll, Test-WCPManifest, Get-ProcessorArchitecture, Test-WCPManifestCompressed, Get-WCPCompressionTypeName
