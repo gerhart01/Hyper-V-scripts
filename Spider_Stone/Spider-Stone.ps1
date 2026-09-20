@@ -125,9 +125,14 @@ $script:Config = @{
         Packages = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\Packages"
         UpdateDetect = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\UpdateDetect"
     }
-    ManifestsPath = "C:\Windows\WinSxS\Manifests"
-    ServicingPath = "C:\Windows\servicing\Packages"
+    ManifestsPath = (Join-Path $env:SystemRoot "WinSxS\Manifests")
+    ServicingPath = (Join-Path $env:SystemRoot "servicing\Packages")
     SuffixesToRemove = @("-fod-package", "-opt-package", "-package")
+    # Architecture prefixes of WinSxS manifest file names
+    # (<arch>_<name>_<pubKey>_<ver>_<lang>_<hash>.manifest). A feature on x64 also stages
+    # wow64/x86/msil components (~1/4 of all manifests), so ALL are searched - not just the
+    # running architecture, which would silently miss those components.
+    ManifestArchPrefixes = @("amd64", "wow64", "x86", "msil", "arm64", "arm")
 }
 #endregion
 
@@ -365,6 +370,38 @@ function Write-Header {
     Write-Host ("=" * $Title.Length) -ForegroundColor $Color
 }
 
+function Write-StageProgress {
+    <#
+    .SYNOPSIS
+        Draws a Write-Progress bar and, when driven by a front-end (e.g. the GUI),
+        also emits a machine-readable progress line.
+    .DESCRIPTION
+        Always renders the normal Write-Progress bar (unchanged CLI behavior).
+        Additionally, only when the environment variable SPIDERSTONE_PROGRESS_STDOUT
+        equals '1', writes a parseable marker to the host stream:
+            ##PROGRESS##|<Activity>|<Percent>|<Status>
+        Write-Host is used on purpose: it does not go to the success (output) stream,
+        so it never pollutes the return value of the calling function.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Activity,
+        [int]$PercentComplete = 0,
+        [string]$Status = "",
+        [switch]$Completed
+    )
+
+    if ($Completed) {
+        Write-Progress -Activity $Activity -Completed
+    } else {
+        Write-Progress -Activity $Activity -Status $Status -PercentComplete $PercentComplete
+    }
+
+    if ($env:SPIDERSTONE_PROGRESS_STDOUT -eq '1') {
+        $pct = if ($Completed) { 100 } else { $PercentComplete }
+        Write-Host "##PROGRESS##|$Activity|$pct|$Status"
+    }
+}
+
 function Test-RegistryPath {
     <#
     .SYNOPSIS
@@ -530,7 +567,13 @@ function Show-InstalledFeatures {
     
     Write-Host "`nTotal: $($allFeatures.Count) feature(s)" -ForegroundColor Green
     Write-Host ("=" * 50) -ForegroundColor Cyan
-    
+
+    # Machine-readable feature list for a front-end (e.g. the GUI dropdown/autocomplete).
+    # Emitted via Write-Host only when opted in, so normal CLI output is unchanged.
+    if ($env:SPIDERSTONE_PROGRESS_STDOUT -eq '1') {
+        foreach ($feature in $allFeatures) { Write-Host "##FEATURE##|$feature" }
+    }
+
     return $allFeatures
 }
 
@@ -607,7 +650,7 @@ function Get-CbsPackageDiscovery {
         foreach ($name in $names) {
             $idx++
             if ($total -gt 0 -and ($idx % 200 -eq 0 -or $idx -eq $total)) {
-                Write-Progress -Activity $act1 -Status "$idx / $total (found: $($featurePkgs.Count))" `
+                Write-StageProgress -Activity $act1 -Status "$idx / $total (found: $($featurePkgs.Count))" `
                                -PercentComplete (($idx / $total) * 100)
             }
             $pkgKey = $baseKey.OpenSubKey($name)
@@ -628,7 +671,7 @@ function Get-CbsPackageDiscovery {
                 }
             } finally { $pkgKey.Dispose() }
         }
-        if ($total -gt 0) { Write-Progress -Activity $act1 -Completed }
+        if ($total -gt 0) { Write-StageProgress -Activity $act1 -Completed }
 
         # --- Pass 2: owner packages (Owners subkey references a feature package) ---
         # Skipped entirely when nothing was found (common case), saving a full scan.
@@ -638,7 +681,7 @@ function Get-CbsPackageDiscovery {
             foreach ($name in $names) {
                 $idx++
                 if ($total -gt 0 -and ($idx % 200 -eq 0 -or $idx -eq $total)) {
-                    Write-Progress -Activity $act2 -Status "$idx / $total (owners: $($ownerPkgs.Count))" `
+                    Write-StageProgress -Activity $act2 -Status "$idx / $total (owners: $($ownerPkgs.Count))" `
                                    -PercentComplete (($idx / $total) * 100)
                 }
                 $pkgKey = $baseKey.OpenSubKey($name)
@@ -668,7 +711,7 @@ function Get-CbsPackageDiscovery {
                     }
                 } finally { $pkgKey.Dispose() }
             }
-            if ($total -gt 0) { Write-Progress -Activity $act2 -Completed }
+            if ($total -gt 0) { Write-StageProgress -Activity $act2 -Completed }
         }
 
         $result.FeaturePackages = $featurePkgs.ToArray()
@@ -703,11 +746,21 @@ function Parse-MumFile {
     if ($null -eq $xmlContent) {
         return $components
     }
-    
-    [xml]$xml = $xmlContent
-    
-    # Find all assemblyIdentity elements with name attributes
-    $assemblyIdentities = $xml.SelectNodes("//assemblyIdentity[@name]")
+
+    # Guard the cast: a few servicing files that slip through the filter are binary
+    # (e.g. catalogs) and are not valid XML; skip them quietly instead of erroring.
+    try {
+        [xml]$xml = $xmlContent
+    } catch {
+        Write-VerboseMessage "Skipping non-XML file: $MumFilePath"
+        return $components
+    }
+
+    # Find all assemblyIdentity elements with name attributes.
+    # MUM files declare a default namespace (urn:schemas-microsoft-com:asm.v3), so a
+    # plain "//assemblyIdentity" XPath matches NOTHING; use local-name() to ignore the
+    # namespace and catch every assemblyIdentity regardless of prefix/namespace.
+    $assemblyIdentities = $xml.SelectNodes("//*[local-name()='assemblyIdentity'][@name]")
     
     if ($null -ne $assemblyIdentities) {
         foreach ($identity in $assemblyIdentities) {
@@ -740,8 +793,9 @@ function Process-MumFiles {
         
         $script:Config.ProcessedMumFiles += $mumName
         
-        # Search for MUM file
-        $mumFiles = Get-ChildItem -Path $mumPath -Filter "*$mumName*" -ErrorAction SilentlyContinue
+        # Search for MUM file (only *.mum - the filter would otherwise also match the
+        # binary *.cat catalogs sharing the same base name, which are not XML).
+        $mumFiles = Get-ChildItem -Path $mumPath -Filter "*$mumName*.mum" -ErrorAction SilentlyContinue
         
         foreach ($mumFile in $mumFiles) {
             Write-Host "  Processing MUM: $($mumFile.Name)" -ForegroundColor Cyan
@@ -762,16 +816,20 @@ function Process-MumFiles {
 #endregion
 
 #region Manifest File Functions
-function Get-ManifestFileName {
+function Get-ManifestNameCore {
     <#
     .SYNOPSIS
-        Generates manifest file name prefix from package name
+        Builds the architecture-independent manifest name core from a package/component name.
+    .DESCRIPTION
+        Lowercases the name and trims the packaging suffix (-package / -fod-package /
+        -opt-package). The architecture prefix (amd64_/wow64_/x86_/msil_/...) is NOT added
+        here - Find-ManifestFiles adds it and searches every architecture, because a feature
+        on x64 also stages wow64/x86/msil components.
     #>
     param([string]$PackageName)
-    
-    $arch = Get-SystemArchitecturePrefix
-    $manifestName = $arch + $PackageName.ToLower()
-    
+
+    $manifestName = $PackageName.ToLower()
+
     # Remove suffixes
     foreach ($suffix in $script:Config.SuffixesToRemove) {
         if ($manifestName.Contains($suffix)) {
@@ -780,39 +838,46 @@ function Get-ManifestFileName {
             break
         }
     }
-    
-    Write-VerboseMessage "Generated manifest name prefix: $manifestName"
+
+    Write-VerboseMessage "Manifest name core: $manifestName"
     return $manifestName
 }
 
 function Find-ManifestFiles {
     <#
     .SYNOPSIS
-        Searches for manifest files matching the specified prefix
+        Finds WinSxS manifests for a name core across ALL architectures.
+    .DESCRIPTION
+        WinSxS manifest file names are <arch>_<name>_<pubKey>_<ver>_<lang>_<hash>.manifest.
+        A feature on x64 stages not only amd64 components but also wow64/x86/msil ones, so
+        every architecture prefix in Config.ManifestArchPrefixes is searched. Searching only
+        the running architecture (the old behavior) silently missed ~1/4 of components.
     #>
-    param([string]$ManifestPrefix)
-    
+    param([string]$NameCore)
+
     $foundFiles = @()
-    
+
     if (-not (Test-Path $script:Config.ManifestsPath)) {
         Write-Warning "Manifests directory not found: $($script:Config.ManifestsPath)"
         return $foundFiles
     }
-    
-    $searchPattern = "$ManifestPrefix*.manifest"
-    Write-VerboseMessage "Searching for: $searchPattern in $($script:Config.ManifestsPath)"
-    
-    $files = Get-ChildItem -Path $script:Config.ManifestsPath `
-                          -Filter $searchPattern `
-                          -ErrorAction SilentlyContinue
-    
-    if ($null -ne $files) {
-        foreach ($file in $files) {
-            Write-VerboseMessage "Found manifest: $($file.Name)"
-            $foundFiles += $file
+
+    foreach ($arch in $script:Config.ManifestArchPrefixes) {
+        $searchPattern = "${arch}_${NameCore}*.manifest"
+        Write-VerboseMessage "Searching for: $searchPattern in $($script:Config.ManifestsPath)"
+
+        $files = Get-ChildItem -Path $script:Config.ManifestsPath `
+                              -Filter $searchPattern `
+                              -ErrorAction SilentlyContinue
+
+        if ($null -ne $files) {
+            foreach ($file in $files) {
+                Write-VerboseMessage "Found manifest: $($file.Name)"
+                $foundFiles += $file
+            }
         }
     }
-    
+
     return $foundFiles
 }
 
@@ -839,7 +904,7 @@ function Copy-ManifestFiles {
     foreach ($file in $ManifestFiles) {
         $idx++
         if ($total -gt 0) {
-            Write-Progress -Activity "Copying manifests" `
+            Write-StageProgress -Activity "Copying manifests" `
                            -Status "$idx of $total : $($file.Name)" `
                            -PercentComplete (($idx / $total) * 100)
         }
@@ -852,7 +917,7 @@ function Copy-ManifestFiles {
             Write-Warning "Failed to copy $($file.Name)"
         }
     }
-    if ($total -gt 0) { Write-Progress -Activity "Copying manifests" -Completed }
+    if ($total -gt 0) { Write-StageProgress -Activity "Copying manifests" -Completed }
 
     return $copiedFiles
 }
@@ -928,7 +993,7 @@ function Extract-ManifestFiles {
     foreach ($file in $ManifestFiles) {
         $idx++
         if ($total -gt 0) {
-            Write-Progress -Activity "Decompressing manifests (WCP)" `
+            Write-StageProgress -Activity "Decompressing manifests (WCP)" `
                            -Status "$idx of $total : $([System.IO.Path]::GetFileName($file))" `
                            -PercentComplete (($idx / $total) * 100)
         }
@@ -950,9 +1015,17 @@ function Extract-ManifestFiles {
             if ($null -ne $script:Config.WcpDllPath) {
                 $params['WCPDllPath'] = $script:Config.WcpDllPath
             }
-            
-            Expand-WCPFile @params
-            
+
+            # Isolate each file: Expand-WCPFile ends its catch with `throw`, so an unsupported
+            # type (e.g. DCS/type 5) or any decompression failure would otherwise terminate the
+            # whole loop (and the run). Catch here so one bad manifest is skipped, not fatal.
+            try {
+                Expand-WCPFile @params
+            } catch {
+                Write-Warning "Failed to extract $fullInputPath : $($_.Exception.Message)"
+                continue
+            }
+
             if (Test-Path $fullOutputPath) {
                 Write-VerboseMessage "Successfully extracted"
             } else {
@@ -963,7 +1036,7 @@ function Extract-ManifestFiles {
             break
         }
     }
-    if ($total -gt 0) { Write-Progress -Activity "Decompressing manifests (WCP)" -Completed }
+    if ($total -gt 0) { Write-StageProgress -Activity "Decompressing manifests (WCP)" -Completed }
 }
 #endregion
 
@@ -1522,18 +1595,25 @@ function Main {
         Write-Host "  - $($pkg.PackageName) [$($pkg.Source)]" -ForegroundColor Gray
     }
 
-    # Collect MUM files for processing if enabled
+    # Seed names for the recursive MUM component chain. A feature's real payload is
+    # often described ONLY through MUM files - e.g. an OptionalFeature marker package
+    # whose FOD/content package pulls in dozens of component packages, each a nearly
+    # empty MUM with a single <update>. So we seed the chain with the feature name and
+    # every discovered package name (the feature name catches the FOD/content MUMs by
+    # substring; recursion then follows the real assemblyIdentity references).
     $mumFilesToProcess = @()
+    if (-not [string]::IsNullOrWhiteSpace($FeatureName)) { $mumFilesToProcess += $FeatureName }
 
     # Find manifest files
     $allManifests = @()
 
-    # Feature packages -> manifests
+    # Feature packages -> manifests (+ seed their names for the MUM chain)
     foreach ($package in $packages) {
         Write-VerboseMessage "Processing package: $($package.PackageName)"
+        $mumFilesToProcess += $package.PackageName
 
-        $manifestPrefix = Get-ManifestFileName -PackageName $package.PackageName
-        $manifests = Find-ManifestFiles -ManifestPrefix $manifestPrefix
+        $manifestCore = Get-ManifestNameCore -PackageName $package.PackageName
+        $manifests = Find-ManifestFiles -NameCore $manifestCore
 
         if ($manifests.Count -gt 0) {
             $allManifests += $manifests
@@ -1544,47 +1624,52 @@ function Main {
     foreach ($ownerPackage in $discovery.OwnerPackages) {
         Write-VerboseMessage "Processing owner package: $($ownerPackage.PackageName)"
 
-        # Collect MUM file names if ParsingMum is enabled
-        if ($ParsingMum -and -not [string]::IsNullOrWhiteSpace($ownerPackage.InstallName) `
-            -and $ownerPackage.InstallName -ne "N/A") {
+        if (-not [string]::IsNullOrWhiteSpace($ownerPackage.InstallName) -and $ownerPackage.InstallName -ne "N/A") {
             $mumFilesToProcess += $ownerPackage.InstallName
         }
 
-        $ownerManifestPrefix = Get-ManifestFileName -PackageName $ownerPackage.PackageName
-        $ownerManifests = Find-ManifestFiles -ManifestPrefix $ownerManifestPrefix
+        $ownerManifestCore = Get-ManifestNameCore -PackageName $ownerPackage.PackageName
+        $ownerManifests = Find-ManifestFiles -NameCore $ownerManifestCore
 
         if ($ownerManifests.Count -gt 0) {
             $allManifests += $ownerManifests
         }
     }
-    
-    # Process MUM files if enabled
-    if ($ParsingMum -and $mumFilesToProcess.Count -gt 0) {
+
+    # Follow the MUM chain when explicitly requested (-ParsingMum), or automatically as
+    # a fallback when direct package -> manifest matching found nothing (the usual case
+    # for OptionalFeature markers, whose payload lives entirely in the MUM chain).
+    $mumFallback = ($allManifests.Count -eq 0)
+    if (($ParsingMum -or $mumFallback) -and $mumFilesToProcess.Count -gt 0) {
         Write-Header -Title "Processing MUM files" -Color Yellow
-        $mumComponents = Process-MumFiles -MumFileNames $mumFilesToProcess
-        
+        if ($mumFallback -and -not $ParsingMum) {
+            Write-Host "No manifests matched package names directly; following the MUM component chain..." -ForegroundColor Yellow
+        }
+
+        $mumComponents = Process-MumFiles -MumFileNames ($mumFilesToProcess | Select-Object -Unique)
+
         if ($mumComponents.Count -gt 0) {
             Write-Host "Found $($mumComponents.Count) component(s) in MUM files" -ForegroundColor Green
-            
+
             # Find manifest files for MUM components
             foreach ($component in $mumComponents) {
-                $componentManifestPrefix = Get-ManifestFileName -PackageName $component
-                $componentManifests = Find-ManifestFiles -ManifestPrefix $componentManifestPrefix
-                
+                $componentManifestCore = Get-ManifestNameCore -PackageName $component
+                $componentManifests = Find-ManifestFiles -NameCore $componentManifestCore
+
                 if ($componentManifests.Count -gt 0) {
                     $allManifests += $componentManifests
                 }
             }
         }
     }
-    
+
     # Remove duplicates
     $allManifests = $allManifests | Select-Object -Unique
-    
+
     Write-Host "`nFound $($allManifests.Count) manifest file(s)" -ForegroundColor Green
-    
+
     if ($allManifests.Count -eq 0) {
-        Write-Warning "No manifest files found"
+        Write-Warning "No manifest files found for feature '$FeatureName' (checked package manifests and the MUM component chain)."
         return
     }
     
@@ -1604,7 +1689,7 @@ function Main {
     foreach ($copiedFile in $copiedFiles) {
         $parseIdx++
         if ($parseTotal -gt 0) {
-            Write-Progress -Activity "Parsing manifests" `
+            Write-StageProgress -Activity "Parsing manifests" `
                            -Status "$parseIdx of $parseTotal : $([System.IO.Path]::GetFileName($copiedFile))" `
                            -PercentComplete (($parseIdx / $parseTotal) * 100)
         }
@@ -1615,7 +1700,7 @@ function Main {
             Parse-ManifestXml -XmlFilePath $extractedFile | Out-Null
         }
     }
-    if ($parseTotal -gt 0) { Write-Progress -Activity "Parsing manifests" -Completed }
+    if ($parseTotal -gt 0) { Write-StageProgress -Activity "Parsing manifests" -Completed }
 
     # Report on the component name filter, if one was supplied
     if (-not [string]::IsNullOrWhiteSpace($ComponentFilter)) {
